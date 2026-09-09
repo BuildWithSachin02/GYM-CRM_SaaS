@@ -1,0 +1,103 @@
+import type { Metadata } from "next"
+import { redirect } from "next/navigation"
+
+import { requireUser } from "@/lib/auth/auth"
+import { prisma } from "@/lib/prisma"
+import { can } from "@/lib/permissions"
+import { dayKeyOf } from "@/lib/format"
+
+import { AttendancePage } from "@/components/attendance/attendance-page"
+
+export const metadata: Metadata = {
+  title: "Attendance",
+}
+
+type SearchParams = Promise<{ date?: string }>
+
+export default async function AttendanceRoute({
+  searchParams,
+}: {
+  searchParams: SearchParams
+}) {
+  const user = await requireUser()
+
+  if (!can(user, "attendance:view")) {
+    redirect("/dashboard")
+  }
+
+  const params = await searchParams
+  const todayKey = params.date?.trim() || dayKeyOf(new Date())
+
+  const [checkins, totalCount, activeQrSessions, members, locations] =
+    await Promise.all([
+      prisma.checkIn.findMany({
+        where: {
+          organizationId: user.organizationId,
+          dayKey: todayKey,
+        },
+        include: {
+          member: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+        },
+        orderBy: { checkedInAt: "desc" },
+      }),
+      prisma.checkIn.count({
+        where: {
+          organizationId: user.organizationId,
+          dayKey: todayKey,
+        },
+      }),
+      prisma.qRSession.findMany({
+        where: {
+          organizationId: user.organizationId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        include: {
+          location: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.member.findMany({
+        where: {
+          organizationId: user.organizationId,
+          status: "ACTIVE",
+          deletedAt: null,
+        },
+        select: { id: true, firstName: true, lastName: true },
+        orderBy: { firstName: "asc" },
+      }),
+      prisma.gymLocation.findMany({
+        where: { organizationId: user.organizationId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+    ])
+
+  const serializedCheckins = checkins.map((c) => ({
+    id: c.id,
+    memberName: `${c.member.firstName} ${c.member.lastName}`,
+    source: c.source,
+    checkedInAt: c.checkedInAt.toISOString(),
+  }))
+
+  const serializedSessions = activeQrSessions.map((s) => ({
+    id: s.id,
+    label: s.label,
+    locationName: s.location.name,
+    expiresAt: s.expiresAt.toISOString(),
+  }))
+
+  return (
+    <AttendancePage
+      checkins={serializedCheckins}
+      totalCount={totalCount}
+      todayKey={todayKey}
+      activeQrSessions={serializedSessions}
+      members={members}
+      locations={locations}
+      canRecord={can(user, "attendance:record")}
+    />
+  )
+}

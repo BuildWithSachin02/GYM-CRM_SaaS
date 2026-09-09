@@ -1,0 +1,587 @@
+// Prisma schema — Gym Management + CRM SaaS (King's Gym)
+// Classic Prisma 6.19.3 workflow. PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (PostgreSQL native enums)
+// ---------------------------------------------------------------------------
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum LocationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  RECEPTIONIST
+  TRAINER
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum PlanInterval {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PAUSED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  RECORDED
+  VOIDED
+  REFUNDED
+}
+
+enum AttendanceSource {
+  MANUAL
+  QR_SESSION
+}
+
+enum LeadStage {
+  NEW
+  CONTACTED
+  VISIT_SCHEDULED
+  VISIT_DONE
+  CONVERTED
+  LOST
+}
+
+enum LeadSource {
+  WEBSITE
+  INSTAGRAM
+  FACEBOOK
+  WHATSAPP
+  GOOGLE
+  WALK_IN
+  MANUAL
+}
+
+enum LeadActivityType {
+  CALL
+  WHATSAPP
+  MESSAGE
+  VISIT
+  NOTE
+  FOLLOW_UP
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum NotificationType {
+  MEMBERSHIP_EXPIRING
+  MEMBERSHIP_EXPIRED
+  NEW_LEAD
+  TASK_ASSIGNED
+  TASK_OVERDUE
+  APPOINTMENT_REMINDER
+  PAYMENT_RECORDED
+  LEAD_CONVERTED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy backbone
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  logoUrl   String?
+  phone     String?
+  email     String?
+  address   String?
+  city      String?
+  state     String?
+  country   String?
+  timezone  String    @default("Asia/Kolkata")
+  currency  String    @default("INR")
+  status    OrgStatus @default(ACTIVE)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  locations      GymLocation[]
+  users          User[]
+  members        Member[]
+  trainers       Trainer[]
+  plans          MembershipPlan[]
+  memberships    Membership[]
+  payments       Payment[]
+  checkIns       CheckIn[]
+  qrSessions     QRSession[]
+  leads          Lead[]
+  leadActivities LeadActivity[]
+  appointments   Appointment[]
+  tasks          Task[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+
+  @@index([status])
+}
+
+model GymLocation {
+  id             String         @id @default(uuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name           String
+  address        String?
+  city           String?
+  state          String?
+  timezone       String         @default("Asia/Kolkata")
+  status         LocationStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  members      Member[]      @relation("MemberLocations")
+  checkIns     CheckIn[]
+  qrSessions   QRSession[]
+  appointments Appointment[]
+  leads        Lead[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Staff / users
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name           String
+  email          String       @unique
+  passwordHash   String
+  phone          String?
+  role           UserRole     @default(RECEPTIONIST)
+  status         UserStatus   @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  trainer           Trainer?
+  recordedPayments  Payment[]      @relation("RecordedPayments")
+  createdQrSessions QRSession[]    @relation("CreatedQrSessions")
+  ownedLeads        Lead[]         @relation("OwnedLeads")
+  staffAppointments Appointment[]  @relation("StaffAppointments")
+  assignedTasks     Task[]         @relation("TaskAssignee")
+  createdTasks      Task[]         @relation("TaskCreator")
+  leadActivities    LeadActivity[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+
+  @@index([organizationId])
+  @@index([organizationId, role])
+  @@index([organizationId, status])
+}
+
+model Trainer {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userId         String       @unique
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio            String?
+  specialties    Json?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  members      Member[]      @relation("AssignedTrainer")
+  appointments Appointment[]
+
+  @@index([organizationId])
+  @@index([organizationId, active])
+}
+
+// ---------------------------------------------------------------------------
+// Members
+// ---------------------------------------------------------------------------
+
+model Member {
+  id                    String       @id @default(uuid())
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  primaryLocationId     String?
+  location              GymLocation? @relation("MemberLocations", fields: [primaryLocationId], references: [id], onDelete: SetNull)
+  firstName             String
+  lastName              String
+  phone                 String
+  email                 String?
+  gender                Gender?
+  dateOfBirth           DateTime?
+  address               String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  trainerId             String?
+  trainer               Trainer?     @relation("AssignedTrainer", fields: [trainerId], references: [id], onDelete: SetNull)
+  signupSource          LeadSource?
+  status                MemberStatus @default(ACTIVE)
+  notes                 String?
+  deletedAt             DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  memberships    Membership[]
+  payments       Payment[]
+  checkIns       CheckIn[]
+  convertedLeads Lead[]
+  tasks          Task[]        @relation("TaskMember")
+  appointments   Appointment[]
+
+  @@unique([organizationId, email])
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, trainerId])
+  @@index([organizationId, primaryLocationId])
+}
+
+// ---------------------------------------------------------------------------
+// Plans & memberships
+// ---------------------------------------------------------------------------
+
+model MembershipPlan {
+  id              String       @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name            String
+  billingInterval PlanInterval
+  priceMinor      Int
+  currency        String       @default("INR")
+  durationDays    Int
+  description     String?
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  memberships     Membership[]
+  interestedLeads Lead[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, active])
+}
+
+model Membership {
+  id                  String           @id @default(uuid())
+  organizationId      String
+  organization        Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberId            String
+  member              Member           @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  planId              String
+  plan                MembershipPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  status              MembershipStatus @default(ACTIVE)
+  startDate           DateTime
+  endDate             DateTime
+  amountMinor         Int
+  notes               String?
+  renewsAutomatically Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  payments Payment[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, memberId])
+  @@index([organizationId, planId])
+  @@index([organizationId, endDate])
+}
+
+// ---------------------------------------------------------------------------
+// Payments (manual only, integer minor units)
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id             String        @id @default(uuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberId       String
+  member         Member        @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  membershipId   String?
+  membership     Membership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  amountMinor    Int
+  currency       String        @default("INR")
+  method         PaymentMethod
+  status         PaymentStatus @default(RECORDED)
+  reference      String?
+  paymentDate    DateTime      @default(now())
+  recordedById   String
+  recordedBy     User          @relation("RecordedPayments", fields: [recordedById], references: [id], onDelete: Restrict)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, memberId])
+  @@index([organizationId, membershipId])
+  @@index([organizationId, paymentDate])
+  @@index([organizationId, method])
+}
+
+// ---------------------------------------------------------------------------
+// Attendance (manual + QR) — one check-in per member per dayKey
+// ---------------------------------------------------------------------------
+
+model CheckIn {
+  id             String           @id @default(uuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberId       String
+  member         Member           @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  locationId     String?
+  location       GymLocation?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  qrSessionId    String?
+  qrSession      QRSession?       @relation(fields: [qrSessionId], references: [id], onDelete: Restrict)
+  source         AttendanceSource @default(MANUAL)
+  dayKey         String // YYYY-MM-DD (UTC) — used for duplicate prevention
+  checkedInAt    DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+
+  @@unique([organizationId, memberId, dayKey])
+  @@index([organizationId])
+  @@index([organizationId, memberId])
+  @@index([organizationId, locationId, checkedInAt])
+}
+
+model QRSession {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  locationId     String
+  location       GymLocation  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  label          String?
+  tokenHash      String       @unique // only the hash is ever stored
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdById    String
+  createdBy      User         @relation("CreatedQrSessions", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+
+  checkIns CheckIn[]
+
+  @@index([organizationId])
+  @@index([organizationId, expiresAt])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Leads / CRM
+// ---------------------------------------------------------------------------
+
+model Lead {
+  id                String          @id @default(uuid())
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  locationId        String?
+  location          GymLocation?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  name              String
+  phone             String
+  email             String?
+  source            LeadSource
+  sourceDetail      String?
+  stage             LeadStage       @default(NEW)
+  interestedPlanId  String?
+  interestedPlan    MembershipPlan? @relation(fields: [interestedPlanId], references: [id], onDelete: SetNull)
+  ownerUserId       String?
+  ownerUser         User?           @relation("OwnedLeads", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  followUpDate      DateTime?
+  notes             String?
+  convertedMemberId String?         @unique
+  convertedMember   Member?         @relation(fields: [convertedMemberId], references: [id], onDelete: SetNull)
+  convertedAt       DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  leadActivities LeadActivity[]
+  appointments   Appointment[]
+  tasks          Task[]         @relation("TaskLead")
+
+  @@unique([organizationId, email])
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+  @@index([organizationId, stage])
+  @@index([organizationId, source])
+  @@index([organizationId, ownerUserId])
+  @@index([organizationId, followUpDate])
+}
+
+model LeadActivity {
+  id             String           @id @default(uuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  leadId         String
+  lead           Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type           LeadActivityType
+  body           String
+  createdById    String?
+  createdBy      User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  activityDate   DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, leadId])
+}
+
+// ---------------------------------------------------------------------------
+// Appointments
+// ---------------------------------------------------------------------------
+
+model Appointment {
+  id             String            @id @default(uuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  locationId     String?
+  location       GymLocation?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  memberId       String?
+  member         Member?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  leadId         String?
+  lead           Lead?             @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  trainerId      String?
+  trainer        Trainer?          @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+  staffId        String?
+  staff          User?             @relation("StaffAppointments", fields: [staffId], references: [id], onDelete: SetNull)
+  startsAt       DateTime
+  endsAt         DateTime
+  status         AppointmentStatus @default(SCHEDULED)
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, startsAt])
+  @@index([organizationId, status])
+  @@index([organizationId, memberId])
+  @@index([organizationId, leadId])
+  @@index([organizationId, trainerId])
+}
+
+// ---------------------------------------------------------------------------
+// Tasks / follow-ups
+// ---------------------------------------------------------------------------
+
+model Task {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  title          String
+  description    String?
+  dueDate        DateTime
+  status         TaskStatus   @default(TODO)
+  assigneeId     String?
+  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdById    String?
+  createdBy      User?        @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  memberId       String?
+  member         Member?      @relation("TaskMember", fields: [memberId], references: [id], onDelete: SetNull)
+  leadId         String?
+  lead           Lead?        @relation("TaskLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, assigneeId])
+  @@index([organizationId, dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (in-app inbox only)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id             String           @id @default(uuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String?
+  link           String?
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, userId, isRead])
+  @@index([organizationId, isRead])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (append-only)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  actorUserId    String?
+  actorUser      User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action         String
+  entityType     String
+  entityId       String?
+  before         Json?
+  after          Json?
+  ip             String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, entityId])
+}
