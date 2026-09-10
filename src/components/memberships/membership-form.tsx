@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 
-import { fullName } from "@/lib/format"
+import { fullName, formatMoney } from "@/lib/format"
 import { createMembership } from "@/lib/actions/memberships"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const membershipFormSchema = z.object({
   memberId: z.string().min(1, "Select a member"),
@@ -105,7 +106,7 @@ export function MembershipForm({ members, plans, trigger }: MembershipFormProps)
       const result = await createMembership({
         memberId: data.memberId,
         planId: data.planId,
-        startDate: new Date(data.startDate),
+        startDate: data.startDate,
         durationDays: selectedPlan.durationDays,
         amountMinor: Math.round(Number(data.amount) * 100),
         method: data.method,
@@ -163,18 +164,16 @@ export function MembershipForm({ members, plans, trigger }: MembershipFormProps)
                 <FormItem>
                   <FormLabel>Member *</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(val) => field.onChange(val)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a member" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {members.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {fullName(m.firstName, m.lastName)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityCombobox
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={members.map((m) => ({
+                        id: m.id,
+                        label: fullName(m.firstName, m.lastName),
+                      }))}
+                      placeholder="Search or select a member"
+                      emptyText="No members found."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -188,18 +187,17 @@ export function MembershipForm({ members, plans, trigger }: MembershipFormProps)
                 <FormItem>
                   <FormLabel>Plan *</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(val) => field.onChange(val)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {plans.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name} ({p.durationDays} days)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityCombobox
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={plans.map((p) => ({
+                        id: p.id,
+                        label: p.name,
+                        sublabel: `${formatMoney(p.priceMinor)} · ${p.durationDays} days`,
+                      }))}
+                      placeholder="Search or select a plan"
+                      emptyText="No plans found."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -32,7 +32,8 @@ export function formatTime(d: Date | string | null | undefined): string {
 }
 
 export function dayKeyOf(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 export function fullName(first: string, last: string): string {

@@ -15,8 +15,9 @@ import {
   UserMenu,
   type ShellNotification,
 } from "@/components/shell/topbar"
-import { cn } from "@/lib/utils"
+import { ThemeToggle } from "@/components/shell/theme-toggle"
 import type { SessionUser } from "@/lib/auth/auth"
+import type { SidebarCounts } from "@/lib/domain/counts"
 
 const TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -46,10 +47,11 @@ function titleForPath(pathname: string): string {
 type ShellProps = {
   user: SessionUser
   notifications: ShellNotification[]
+  sidebarCounts: SidebarCounts
   children: React.ReactNode
 }
 
-export function Shell({ user, notifications, children }: ShellProps) {
+export function Shell({ user, notifications, sidebarCounts, children }: ShellProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
   const unreadCount = notifications.filter((n) => !n.isRead).length
@@ -57,15 +59,16 @@ export function Shell({ user, notifications, children }: ShellProps) {
   const sidebar = (
     <>
       <SidebarBrand />
-      <SidebarNav user={user} />
+      <SidebarNav user={user} counts={sidebarCounts} />
     </>
   )
 
   return (
-    <div className="flex min-h-dvh w-full bg-background">
+    <div className="flex h-dvh w-full overflow-hidden bg-background print:relative print:h-auto print:overflow-visible">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r bg-muted/30 lg:block print:hidden">
-        <div className="flex h-full flex-col">{sidebar}</div>
+      <aside className="hidden w-64 shrink-0 border-r bg-muted/30 lg:flex lg:flex-col print:hidden">
+        <SidebarBrand />
+        <SidebarNav user={user} counts={sidebarCounts} />
       </aside>
 
       {/* Mobile sidebar */}
@@ -87,9 +90,9 @@ export function Shell({ user, notifications, children }: ShellProps) {
         </SheetContent>
       </Sheet>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col print:relative print:overflow-visible">
         {/* Topbar */}
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-6 print:hidden">
+        <header className="z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-6 print:hidden">
           <div className="flex items-center gap-2">
             <span className="lg:hidden">
               <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -105,20 +108,17 @@ export function Shell({ user, notifications, children }: ShellProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <NotificationsMenu
               notifications={notifications}
               unreadCount={unreadCount}
             />
+            <ThemeToggle />
             <UserMenu user={user} />
           </div>
         </header>
 
-        <main
-          className={cn(
-            "flex-1 px-4 py-6 sm:px-6 lg:px-8",
-          )}
-        >
+        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible">
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
       </div>

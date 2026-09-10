@@ -93,6 +93,7 @@ export default async function MembershipsPage({
     id: m.id,
     memberId: m.memberId,
     memberName: `${m.member.firstName} ${m.member.lastName}`.trim(),
+    planId: m.plan.id,
     planName: m.plan.name,
     startDate: m.startDate.toISOString(),
     endDate: m.endDate.toISOString(),

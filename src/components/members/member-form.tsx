@@ -112,9 +112,7 @@ export function MemberForm({ member, trigger }: MemberFormProps) {
       phone: values.phone,
       email: values.email || null,
       gender: (values.gender as "MALE" | "FEMALE" | "OTHER") || null,
-      dateOfBirth: values.dateOfBirth
-        ? new Date(values.dateOfBirth)
-        : null,
+      dateOfBirth: values.dateOfBirth || null,
       address: values.address || null,
       emergencyContactName: values.emergencyContactName || null,
       emergencyContactPhone: values.emergencyContactPhone || null,

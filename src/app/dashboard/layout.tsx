@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 
 import { prisma } from "@/lib/prisma"
 import { requireUser } from "@/lib/auth/auth"
+import { getSidebarCounts } from "@/lib/domain/counts"
 import { Shell } from "@/components/shell/shell"
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ export default async function DashboardLayout({
 }) {
   const user = await requireUser()
 
-  const [notifications] = await Promise.all([
+  const [notifications, sidebarCounts] = await Promise.all([
     prisma.notification.findMany({
       where: { organizationId: user.organizationId, userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -30,6 +31,7 @@ export default async function DashboardLayout({
         createdAt: true,
       },
     }),
+    getSidebarCounts(user.organizationId),
   ])
 
   return (
@@ -39,6 +41,7 @@ export default async function DashboardLayout({
         ...n,
         createdAt: n.createdAt.toISOString(),
       }))}
+      sidebarCounts={sidebarCounts}
     >
       {children}
     </Shell>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -10,7 +10,6 @@ import { toast } from "sonner"
 import { manualCheckin } from "@/lib/actions/attendance"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -29,6 +28,7 @@ import {
   FormMessage,
   FormServerError,
 } from "@/components/ui/form"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 type Member = { id: string; firstName: string; lastName: string }
 
@@ -48,23 +48,11 @@ export function ManualCheckinForm({ members, trigger }: ManualCheckinFormProps) 
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [serverError, setServerError] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
 
   const form = useForm<ManualCheckinFormValues>({
     resolver: zodResolver(manualCheckinFormSchema),
     defaultValues: { memberId: "" },
   })
-
-  const filteredMembers = useMemo(() => {
-    if (!search.trim()) return members
-    const q = search.toLowerCase()
-    return members.filter(
-      (m) =>
-        m.firstName.toLowerCase().includes(q) ||
-        m.lastName.toLowerCase().includes(q) ||
-        `${m.firstName} ${m.lastName}`.toLowerCase().includes(q)
-    )
-  }, [members, search])
 
   function onSubmit(data: ManualCheckinFormValues) {
     setServerError(null)
@@ -77,7 +65,6 @@ export function ManualCheckinForm({ members, trigger }: ManualCheckinFormProps) 
         toast.success("Member checked in successfully")
         setOpen(false)
         form.reset()
-        setSearch("")
         router.refresh()
       } else {
         setServerError(result.error ?? null)
@@ -98,12 +85,10 @@ export function ManualCheckinForm({ members, trigger }: ManualCheckinFormProps) 
     if (!nextOpen) {
       form.reset()
       setServerError(null)
-      setSearch("")
     }
   }
 
   const selectedMemberId = form.watch("memberId")
-  const selectedMember = members.find((m) => m.id === selectedMemberId)
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -128,48 +113,17 @@ export function ManualCheckinForm({ members, trigger }: ManualCheckinFormProps) 
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Member</FormLabel>
-                  <div className="space-y-2">
-                    <Input
-                      placeholder="Search members..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                    {selectedMember && (
-                      <p className="text-sm text-muted-foreground">
-                        Selected:{" "}
-                        <span className="font-medium text-foreground">
-                          {selectedMember.firstName} {selectedMember.lastName}
-                        </span>
-                      </p>
-                    )}
-                    <div className="max-h-48 overflow-y-auto rounded-lg border">
-                      {filteredMembers.length === 0 ? (
-                        <p className="px-3 py-2 text-sm text-muted-foreground">
-                          No members found.
-                        </p>
-                      ) : (
-                        filteredMembers.map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              field.onChange(m.id)
-                              setSearch(
-                                `${m.firstName} ${m.lastName}`
-                              )
-                            }}
-                            className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${
-                              field.value === m.id ? "bg-muted font-medium" : ""
-                            }`}
-                          >
-                            {m.firstName} {m.lastName}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
                   <FormControl>
-                    <input type="hidden" {...field} />
+                    <EntityCombobox
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={members.map((m) => ({
+                        id: m.id,
+                        label: `${m.firstName} ${m.lastName}`.trim(),
+                      }))}
+                      placeholder="Search or select a member"
+                      emptyText="No members found."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

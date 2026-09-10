@@ -52,9 +52,10 @@ type TaskListProps = {
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  { value: "TODO", label: "To do" },
-  { value: "IN_PROGRESS", label: "In progress" },
-  { value: "COMPLETED", label: "Completed" },
+  ...Object.entries(TASK_STATUS).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 export function TaskList({
@@ -168,6 +169,7 @@ export function TaskList({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 text-muted-foreground">#</TableHead>
                 <TableHead className="w-10" />
                 <TableHead>Task</TableHead>
                 <TableHead>Due date</TableHead>
@@ -178,11 +180,15 @@ export function TaskList({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tasks.map((task) => {
+              {tasks.map((task, index) => {
                 const isOverdue =
                   task.status !== "COMPLETED" && new Date(task.dueDate) < new Date()
+                const rowNumber = (filters.page - 1) * 25 + index + 1
                 return (
                   <TableRow key={task.id} className={task.status === "COMPLETED" ? "opacity-60" : ""}>
+                    <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                      {rowNumber}
+                    </TableCell>
                     <TableCell>
                       <button
                         type="button"

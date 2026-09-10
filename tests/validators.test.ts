@@ -7,6 +7,7 @@ import {
   leadSchema,
   loginSchema,
   memberSchema,
+  membershipCreateSchema,
   orgSettingsSchema,
   paymentSchema,
   planSchema,
@@ -190,6 +191,80 @@ test("taskSchema requires a due date", () => {
     assigneeId: null,
     memberId: null,
     leadId: null,
+  })
+  assert.equal(res.success, false)
+})
+
+test("nullable date fields accept string and Date input and normalize to Date", () => {
+  const stringInput = memberSchema.safeParse({
+    firstName: "Rahul",
+    lastName: "Sharma",
+    phone: "+91 98765 43210",
+    email: null,
+    gender: null,
+    dateOfBirth: "1995-06-15",
+    notes: null,
+  })
+  assert.equal(stringInput.success, true)
+  if (stringInput.success) {
+    assert.ok(stringInput.data.dateOfBirth instanceof Date)
+    assert.equal(stringInput.data.dateOfBirth.toISOString().slice(0, 10), "1995-06-15")
+  }
+
+  const dateInput = memberSchema.safeParse({
+    firstName: "Rahul",
+    lastName: "Sharma",
+    phone: "+91 98765 43210",
+    email: null,
+    gender: null,
+    dateOfBirth: new Date("1995-06-15T00:00:00.000Z"),
+    notes: null,
+  })
+  assert.equal(dateInput.success, true)
+  if (dateInput.success) {
+    assert.ok(dateInput.data.dateOfBirth instanceof Date)
+  }
+})
+
+test("required date fields accept string and Date input and output Date", () => {
+  const stringInput = membershipCreateSchema.safeParse({
+    memberId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: "2026-09-10",
+    durationDays: 30,
+    amountMinor: 99900,
+    method: "CASH",
+    notes: null,
+  })
+  assert.equal(stringInput.success, true)
+  if (stringInput.success) {
+    assert.ok(stringInput.data.startDate instanceof Date)
+  }
+
+  const dateInput = membershipCreateSchema.safeParse({
+    memberId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: new Date("2026-09-10T00:00:00.000Z"),
+    durationDays: 30,
+    amountMinor: 99900,
+    method: "UPI",
+    notes: null,
+  })
+  assert.equal(dateInput.success, true)
+  if (dateInput.success) {
+    assert.ok(dateInput.data.startDate instanceof Date)
+  }
+})
+
+test("required date field rejects invalid and missing values", () => {
+  const res = membershipCreateSchema.safeParse({
+    memberId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: "",
+    durationDays: 30,
+    amountMinor: 99900,
+    method: "CASH",
+    notes: null,
   })
   assert.equal(res.success, false)
 })

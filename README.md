@@ -245,9 +245,15 @@ Create a `.env` file in the project root:
 
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+
+# Secret used to sign session cookies
+AUTH_SECRET="replace-with-a-long-random-string"
+
+# Password used for seeded demo accounts (prisma db seed). Min 8 characters.
+SEED_OWNER_PASSWORD="replace-with-a-demo-password"
 ```
 
-Replace the placeholder values with your PostgreSQL credentials.
+Replace the placeholder values with your own credentials. See `.env.example` for the full list of variables.
 
 ### 4. Generate Prisma Client
 
@@ -263,11 +269,13 @@ npx prisma migrate dev
 
 ### 6. Seed Development Data
 
-Optional:
+Optional. Requires `SEED_OWNER_PASSWORD` (min 8 characters) to be set in `.env`:
 
 ```bash
 npm run seed
 ```
+
+The seed creates demo accounts whose login password is the value of `SEED_OWNER_PASSWORD`.
 
 ### 7. Start the Development Server
 

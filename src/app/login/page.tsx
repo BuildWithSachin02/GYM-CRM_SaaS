@@ -120,12 +120,12 @@ export default function LoginPage() {
           </Form>
         </CardContent>
         <CardFooter className="flex flex-col items-start gap-1 border-t px-6 py-4 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Demo credentials (local dev)</span>
+          <span className="font-medium text-foreground">Local demo accounts</span>
           <span>
-            Owner: <code>owner@kingsgym.in</code> / <code>Kings@123</code>
+            Email: <code>owner@kingsgym.in</code> or <code>frontdesk@kingsgym.in</code>
           </span>
           <span>
-            Front desk: <code>frontdesk@kingsgym.in</code> / <code>Kings@123</code>
+            Password: set via <code>SEED_OWNER_PASSWORD</code> when seeding.
           </span>
         </CardFooter>
       </Card>

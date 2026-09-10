@@ -8,6 +8,8 @@ import { z } from "zod"
 import { toast } from "sonner"
 
 import { renewMembership } from "@/lib/actions/memberships"
+import { formatDate, formatMoney } from "@/lib/format"
+import { dayAfterYmd } from "@/lib/memberships"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const renewalFormSchema = z.object({
   planId: z.string().min(1, "Select a plan"),
@@ -58,6 +61,7 @@ type RenewalFormProps = {
     id: string
     memberId: string
     memberName: string
+    planId: string
     planName: string
     endDate: string
   }
@@ -72,15 +76,17 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
   const [serverError, setServerError] = useState<string | null>(null)
 
   const currentPlan = useMemo(
-    () => plans.find((p) => p.name === membership.planName) ?? null,
-    [plans, membership.planName]
+    () => plans.find((p) => p.id === membership.planId) ?? null,
+    [plans, membership.planId]
   )
+
+  const suggestedStart = useMemo(() => dayAfterYmd(membership.endDate.slice(0, 10)), [membership.endDate])
 
   const form = useForm<RenewalFormValues>({
     resolver: zodResolver(renewalFormSchema),
     defaultValues: {
       planId: currentPlan?.id ?? "",
-      startDate: new Date().toISOString().slice(0, 10),
+      startDate: suggestedStart,
       amount: currentPlan ? String(currentPlan.priceMinor / 100) : "",
       method: "CASH",
       notes: "",
@@ -113,7 +119,7 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
       const result = await renewMembership({
         membershipId: membership.id,
         planId: data.planId,
-        startDate: new Date(data.startDate),
+        startDate: data.startDate,
         durationDays: selectedPlan.durationDays,
         amountMinor: Math.round(Number(data.amount) * 100),
         method: data.method,
@@ -141,7 +147,8 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)
-    if (!nextOpen) {
+    if (nextOpen) {
+      form.reset()
       setServerError(null)
     }
   }
@@ -163,6 +170,11 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormServerError>{serverError}</FormServerError>
 
+            <p className="text-sm text-muted-foreground">
+              Current membership ends {formatDate(membership.endDate)}. Renewal
+              begins {suggestedStart} unless you change the start date.
+            </p>
+
             <FormField
               control={form.control}
               name="planId"
@@ -170,18 +182,17 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
                 <FormItem>
                   <FormLabel>Plan *</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(val) => field.onChange(val)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {plans.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name} ({p.durationDays} days)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityCombobox
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={plans.map((p) => ({
+                        id: p.id,
+                        label: p.name,
+                        sublabel: `${formatMoney(p.priceMinor)} · ${p.durationDays} days`,
+                      }))}
+                      placeholder="Search or select a plan"
+                      emptyText="No plans found."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

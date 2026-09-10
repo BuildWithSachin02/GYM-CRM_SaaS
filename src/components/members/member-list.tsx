@@ -52,9 +52,10 @@ type MemberListProps = {
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "INACTIVE", label: "Inactive" },
-  { value: "ARCHIVED", label: "Archived" },
+  ...Object.entries(MEMBER_STATUS).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 export function MemberList({
@@ -189,6 +190,7 @@ export function MemberList({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>Email</TableHead>
@@ -197,12 +199,16 @@ export function MemberList({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {members.map((member) => {
+                {members.map((member, index) => {
                   const name = fullName(member.firstName, member.lastName)
                   const statusEntry = MEMBER_STATUS[member.status]
+                  const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
                     <TableRow key={member.id}>
+                      <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                        {rowNumber}
+                      </TableCell>
                       <TableCell>
                         <Link
                           href={`/dashboard/members/${member.id}`}

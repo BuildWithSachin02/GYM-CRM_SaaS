@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const PAYMENT_METHODS = ["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const
 
@@ -88,7 +89,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
         memberId: data.memberId,
         amountMinor: Math.round(Number(data.amount) * 100),
         method: data.method,
-        paymentDate: new Date(data.paymentDate),
+        paymentDate: data.paymentDate,
         reference: data.reference || null,
         notes: data.notes || null,
       })
@@ -136,21 +137,17 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                 <FormItem>
                   <FormLabel>Member *</FormLabel>
                   <FormControl>
-                    <Select
+                    <EntityCombobox
                       value={field.value}
                       onValueChange={(val) => field.onChange(val ?? "")}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Search or select a member" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {members.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {fullName(m.firstName, m.lastName)} · {m.phone}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={members.map((m) => ({
+                        id: m.id,
+                        label: fullName(m.firstName, m.lastName),
+                        sublabel: m.phone,
+                      }))}
+                      placeholder="Search or select a member"
+                      emptyText="No members found."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

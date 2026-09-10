@@ -38,6 +38,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
+import { TASK_STATUS } from "@/lib/status"
+import type { TaskStatus } from "@prisma/client"
 
 const taskFormSchema = z.object({
   title: z.string().trim().min(1, "Required").max(200),
@@ -83,7 +86,7 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
       const res = await createTask({
         title: data.title,
         description: data.description || null,
-        dueDate: new Date(data.dueDate),
+        dueDate: data.dueDate,
         status: data.status,
         assigneeId: data.assigneeId || null,
         memberId: data.memberId || null,
@@ -177,9 +180,13 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
                           <SelectValue placeholder="Select" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="TODO">To do</SelectItem>
-                          <SelectItem value="IN_PROGRESS">In progress</SelectItem>
-                          <SelectItem value="COMPLETED">Completed</SelectItem>
+                          {(Object.entries(TASK_STATUS) as [TaskStatus, (typeof TASK_STATUS)[TaskStatus]][]).map(
+                            ([value, { label }]) => (
+                              <SelectItem key={value} value={value}>
+                                {label}
+                              </SelectItem>
+                            )
+                          )}
                         </SelectContent>
                       </Select>
                     </FormControl>
@@ -196,19 +203,14 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
                 <FormItem>
                   <FormLabel>Assignee</FormLabel>
                   <FormControl>
-                    <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Unassigned" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">Unassigned</SelectItem>
-                        {assignees.map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityCombobox
+                      value={field.value ?? ""}
+                      onValueChange={(v) => field.onChange(v || "")}
+                      options={assignees.map((a) => ({ id: a.id, label: a.name }))}
+                      placeholder="Unassigned"
+                      emptyText="No assignees found."
+                      allowClear
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -223,19 +225,14 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
                   <FormItem>
                     <FormLabel>Linked Member</FormLabel>
                     <FormControl>
-                      <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="None" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">None</SelectItem>
-                          {members.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <EntityCombobox
+                        value={field.value ?? ""}
+                        onValueChange={(v) => field.onChange(v || "")}
+                        options={members.map((m) => ({ id: m.id, label: m.name }))}
+                        placeholder="None"
+                        emptyText="No members found."
+                        allowClear
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -248,19 +245,14 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
                   <FormItem>
                     <FormLabel>Linked Lead</FormLabel>
                     <FormControl>
-                      <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="None" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">None</SelectItem>
-                          {leads.map((l) => (
-                            <SelectItem key={l.id} value={l.id}>
-                              {l.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <EntityCombobox
+                        value={field.value ?? ""}
+                        onValueChange={(v) => field.onChange(v || "")}
+                        options={leads.map((l) => ({ id: l.id, label: l.name }))}
+                        placeholder="None"
+                        emptyText="No leads found."
+                        allowClear
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

@@ -37,6 +37,7 @@ type SerializedMembership = {
   id: string
   memberId: string
   memberName: string
+  planId: string
   planName: string
   startDate: string
   endDate: string
@@ -57,9 +58,10 @@ type MembershipListProps = {
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "EXPIRED", label: "Expired" },
-  { value: "CANCELLED", label: "Cancelled" },
+  ...Object.entries(MEMBERSHIP_STATUS).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 export function MembershipList({
@@ -213,6 +215,7 @@ export function MembershipList({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Member</TableHead>
                   <TableHead>Plan</TableHead>
                   <TableHead>Start Date</TableHead>
@@ -222,14 +225,18 @@ export function MembershipList({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {memberships.map((m) => {
+                {memberships.map((m, index) => {
                   const canRenew =
                     canManage &&
                     (m.status === "EXPIRED" ||
                       (m.status === "ACTIVE" && m.daysLeft !== null && m.daysLeft <= 7))
+                  const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
                     <TableRow key={m.id}>
+                      <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                        {rowNumber}
+                      </TableCell>
                       <TableCell>
                         <Link
                           href={`/dashboard/members/${m.memberId}`}
@@ -261,6 +268,7 @@ export function MembershipList({
                               id: m.id,
                               memberId: m.memberId,
                               memberName: m.memberName,
+                              planId: m.planId,
                               planName: m.planName,
                               endDate: m.endDate,
                             }}

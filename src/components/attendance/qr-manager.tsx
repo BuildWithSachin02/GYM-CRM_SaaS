@@ -28,13 +28,7 @@ import {
 } from "@/components/ui/table"
 import { StatusBadge } from "@/components/common/status-badge"
 import { EmptyState } from "@/components/common/empty-state"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 import { QrDisplay } from "@/components/attendance/qr-display"
 
 type SerializedQrSession = {
@@ -129,6 +123,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Label</TableHead>
                   <TableHead>Location</TableHead>
                   <TableHead>Expires</TableHead>
@@ -136,8 +131,11 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {activeQrSessions.map((s) => (
+                {activeQrSessions.map((s, index) => (
                   <TableRow key={s.id}>
+                    <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </TableCell>
                     <TableCell className="font-medium">
                       {s.label ?? "—"}
                     </TableCell>
@@ -173,18 +171,13 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="qr-location">Location</Label>
-              <Select value={locationId} onValueChange={(v) => setLocationId(v ?? "")}>
-                <SelectTrigger id="qr-location" className="w-full">
-                  <SelectValue placeholder="Select location" />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((loc) => (
-                    <SelectItem key={loc.id} value={loc.id}>
-                      {loc.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityCombobox
+                value={locationId}
+                onValueChange={setLocationId}
+                options={locations.map((loc) => ({ id: loc.id, label: loc.name }))}
+                placeholder="Search or select location"
+                emptyText="No locations found."
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="qr-label">Label (optional)</Label>

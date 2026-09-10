@@ -32,13 +32,7 @@ import {
   FormMessage,
   FormServerError,
 } from "@/components/ui/form"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const appointmentFormSchema = z
   .object({
@@ -128,8 +122,8 @@ export function AppointmentForm({
         leadId: data.subjectType === "LEAD" ? data.leadId || null : null,
         trainerId: data.trainerId || null,
         staffId: null,
-        startsAt: new Date(data.startsAt),
-        endsAt: new Date(data.endsAt),
+        startsAt: data.startsAt,
+        endsAt: data.endsAt,
         status: "SCHEDULED",
         notes: data.notes || null,
         locationId: null,
@@ -204,18 +198,13 @@ export function AppointmentForm({
                   <FormItem>
                     <FormLabel>Member *</FormLabel>
                     <FormControl>
-                      <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select member" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {members.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <EntityCombobox
+                        value={field.value ?? ""}
+                        onValueChange={(v) => field.onChange(v || "")}
+                        options={members.map((m) => ({ id: m.id, label: m.name }))}
+                        placeholder="Search or select member"
+                        emptyText="No members found."
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -229,18 +218,13 @@ export function AppointmentForm({
                   <FormItem>
                     <FormLabel>Lead *</FormLabel>
                     <FormControl>
-                      <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select lead" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {leads.map((l) => (
-                            <SelectItem key={l.id} value={l.id}>
-                              {l.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <EntityCombobox
+                        value={field.value ?? ""}
+                        onValueChange={(v) => field.onChange(v || "")}
+                        options={leads.map((l) => ({ id: l.id, label: l.name }))}
+                        placeholder="Search or select lead"
+                        emptyText="No leads found."
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -255,19 +239,14 @@ export function AppointmentForm({
                 <FormItem>
                   <FormLabel>Trainer</FormLabel>
                   <FormControl>
-                    <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || "")}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="No trainer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">No trainer</SelectItem>
-                        {trainers.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntityCombobox
+                      value={field.value ?? ""}
+                      onValueChange={(v) => field.onChange(v || "")}
+                      options={trainers.map((t) => ({ id: t.id, label: t.name }))}
+                      placeholder="No trainer"
+                      emptyText="No trainers found."
+                      allowClear
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

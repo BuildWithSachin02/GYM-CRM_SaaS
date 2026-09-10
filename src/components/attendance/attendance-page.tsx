@@ -100,14 +100,18 @@ export function AttendancePage({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Member</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Time</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {checkins.map((c) => (
+                {checkins.map((c, index) => (
                   <TableRow key={c.id}>
+                    <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </TableCell>
                     <TableCell className="font-medium">
                       {c.memberName}
                     </TableCell>

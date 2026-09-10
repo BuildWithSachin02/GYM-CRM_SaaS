@@ -102,7 +102,7 @@ export function LeadForm({ lead, trigger }: LeadFormProps) {
       source: values.source,
       sourceDetail: values.sourceDetail || null,
       stage: values.stage,
-      followUpDate: values.followUpDate ? new Date(values.followUpDate) : null,
+      followUpDate: values.followUpDate || null,
       notes: values.notes || null,
     }
   }

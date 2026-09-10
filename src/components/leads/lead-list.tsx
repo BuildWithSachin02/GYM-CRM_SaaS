@@ -55,12 +55,10 @@ type LeadListProps = {
 
 const STAGE_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  { value: "NEW", label: "New" },
-  { value: "CONTACTED", label: "Contacted" },
-  { value: "VISIT_SCHEDULED", label: "Visit Scheduled" },
-  { value: "VISIT_DONE", label: "Visit Done" },
-  { value: "CONVERTED", label: "Converted" },
-  { value: "LOST", label: "Lost" },
+  ...Object.entries(LEAD_STAGE).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 export function LeadList({
@@ -193,6 +191,7 @@ export function LeadList({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>Source</TableHead>
@@ -202,12 +201,16 @@ export function LeadList({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {leads.map((lead) => {
+                {leads.map((lead, index) => {
                   const stageEntry = LEAD_STAGE[lead.stage]
                   const sourceEntry = LEAD_SOURCE[lead.source]
+                  const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
                     <TableRow key={lead.id}>
+                      <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                        {rowNumber}
+                      </TableCell>
                       <TableCell>
                         <Link
                           href={`/dashboard/leads/${lead.id}`}

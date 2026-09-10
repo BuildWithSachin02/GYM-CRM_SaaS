@@ -124,6 +124,7 @@ export function SettingsPage({
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10 text-muted-foreground">#</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
@@ -133,8 +134,11 @@ export function SettingsPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {staff.map((s) => (
+                    {staff.map((s, index) => (
                       <TableRow key={s.id}>
+                        <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                          {index + 1}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Avatar className="size-7">

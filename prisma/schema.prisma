@@ -341,6 +341,10 @@ model Membership {
   @@index([organizationId, memberId])
   @@index([organizationId, planId])
   @@index([organizationId, endDate])
+  // App-layer business rule: at most one ACTIVE/PAUSED membership may
+  // overlap a given period. The D-08 unique index was removed; this index
+  // backs the overlap check in the membership actions.
+  @@index([organizationId, memberId, status, startDate, endDate])
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +393,7 @@ model CheckIn {
   qrSessionId    String?
   qrSession      QRSession?       @relation(fields: [qrSessionId], references: [id], onDelete: Restrict)
   source         AttendanceSource @default(MANUAL)
-  dayKey         String // YYYY-MM-DD (UTC) — used for duplicate prevention
+  dayKey         String // YYYY-MM-DD (local) — used for duplicate prevention
   checkedInAt    DateTime         @default(now())
   createdAt      DateTime         @default(now())
 

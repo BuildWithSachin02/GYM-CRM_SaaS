@@ -18,7 +18,7 @@ import {
 import { requireUser } from "@/lib/auth/auth"
 import { getDashboardData } from "@/lib/domain/dashboard"
 import { formatMoney, formatDateTime, formatTime, pluralize } from "@/lib/format"
-import { APPOINTMENT_STATUS, LEAD_STAGE, PAYMENT_METHOD } from "@/lib/status"
+import { APPOINTMENT_STATUS, LEAD_STAGE, MEMBER_STATUS, PAYMENT_METHOD } from "@/lib/status"
 import { can } from "@/lib/permissions"
 
 import { StatCard } from "@/components/common/stat-card"
@@ -387,7 +387,9 @@ export default async function DashboardPage() {
                     </Link>
                     <p className="text-xs text-muted-foreground">{m.phone}</p>
                   </div>
-                  <StatusBadge tone="success">{m.status}</StatusBadge>
+                  <StatusBadge tone={MEMBER_STATUS[m.status as keyof typeof MEMBER_STATUS]?.tone ?? "muted"}>
+                      {MEMBER_STATUS[m.status as keyof typeof MEMBER_STATUS]?.label ?? m.status}
+                    </StatusBadge>
                 </li>
               ))}
             </ul>

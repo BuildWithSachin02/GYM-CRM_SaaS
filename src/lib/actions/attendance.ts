@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createHash, randomUUID } from "node:crypto"
 
 import { prisma } from "@/lib/prisma"
-import { requireUserOrThrow } from "@/lib/auth/auth"
+import { getCurrentUser, requireUserOrThrow } from "@/lib/auth/auth"
 import { can } from "@/lib/permissions"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { dayKeyOf } from "@/lib/format"
@@ -137,9 +137,6 @@ export async function deactivateQrSession(sessionId: string): Promise<ActionResu
 }
 
 export async function qrCheckin(token: string, memberId: string): Promise<ActionResult> {
-  const user = await requireUserOrThrow()
-  if (!can(user, "attendance:record")) return { success: false, error: "Not authorized" }
-
   const tokenHash = hashToken(token)
   const session = await prisma.qRSession.findUnique({
     where: { tokenHash },
@@ -147,25 +144,37 @@ export async function qrCheckin(token: string, memberId: string): Promise<Action
   })
 
   if (!session) return { success: false, error: "Invalid QR code" }
-  if (session.organizationId !== user.organizationId) return { success: false, error: "Invalid QR code" }
   if (session.revokedAt) return { success: false, error: "QR code has been revoked" }
   if (session.expiresAt < new Date()) return { success: false, error: "QR code has expired" }
 
   const member = await prisma.member.findFirst({
-    where: { id: memberId, organizationId: user.organizationId, deletedAt: null },
+    where: { id: memberId, organizationId: session.organizationId, deletedAt: null },
   })
   if (!member) return { success: false, error: "Member not found" }
   if (member.status !== "ACTIVE") return { success: false, error: "Member is not active" }
 
-  const dayKey = dayKeyOf(new Date())
+  const now = new Date()
+  const activeMembership = await prisma.membership.findFirst({
+    where: {
+      organizationId: session.organizationId,
+      memberId,
+      status: "ACTIVE",
+      startDate: { lte: now },
+      endDate: { gte: now },
+    },
+    select: { id: true },
+  })
+  if (!activeMembership) return { success: false, error: "No active membership" }
+
+  const dayKey = dayKeyOf(now)
   const existing = await prisma.checkIn.findUnique({
-    where: { organizationId_memberId_dayKey: { organizationId: user.organizationId, memberId, dayKey } },
+    where: { organizationId_memberId_dayKey: { organizationId: session.organizationId, memberId, dayKey } },
   })
   if (existing) return { success: false, error: "Member already checked in today" }
 
   const checkIn = await prisma.checkIn.create({
     data: {
-      organizationId: user.organizationId,
+      organizationId: session.organizationId,
       memberId,
       locationId: session.locationId,
       qrSessionId: session.id,
@@ -174,13 +183,14 @@ export async function qrCheckin(token: string, memberId: string): Promise<Action
     },
   })
 
+  const actor = await getCurrentUser()
   await writeAudit({
-    organizationId: user.organizationId,
-    actorUserId: user.id,
+    organizationId: session.organizationId,
+    actorUserId: actor?.id ?? null,
     action: AUDIT_ACTIONS.CHECKIN_QR,
     entityType: "CheckIn",
     entityId: checkIn.id,
-    after: { memberId, dayKey, source: "QR_SESSION", qrSessionId: session.id },
+    after: { memberId, dayKey, source: "QR_SESSION", qrSessionId: session.id, anonymous: !actor },
   })
 
   revalidatePath("/dashboard/attendance")

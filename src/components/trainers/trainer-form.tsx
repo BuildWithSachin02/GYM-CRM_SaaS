@@ -31,13 +31,7 @@ import {
   FormMessage,
   FormServerError,
 } from "@/components/ui/form"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 import { Switch } from "@/components/ui/switch"
 import type { StaffOption, TrainerRow } from "@/components/trainers/trainer-list"
 
@@ -115,26 +109,17 @@ export function TrainerForm({ trigger, availableUsers, trainer }: TrainerFormPro
                 <FormItem>
                   <FormLabel>Staff Member *</FormLabel>
                   <FormControl>
-                    <Select
+                    <EntityCombobox
                       value={field.value}
-                      onValueChange={(val) => field.onChange(val)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select staff member" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableUsers.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name} · {USER_ROLE[u.role].label}
-                          </SelectItem>
-                        ))}
-                        {availableUsers.length === 0 && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">
-                            No available staff to add.
-                          </div>
-                        )}
-                      </SelectContent>
-                    </Select>
+                      onValueChange={field.onChange}
+                      options={availableUsers.map((u) => ({
+                        id: u.id,
+                        label: u.name,
+                        sublabel: USER_ROLE[u.role].label,
+                      }))}
+                      placeholder="Search staff member"
+                      emptyText="No available staff to add."
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -35,14 +35,25 @@ const optionalEmail = () =>
 
 const email = () => z.string().trim().email("Enter a valid email").toLowerCase()
 
+// Date fields travel over the wire as strings ("YYYY-MM-DD" for dates,
+// "YYYY-MM-DDTHH:mm" for datetimes). Accept a Date too so callers have a
+// single, forgiving contract, then normalize to a real Date for the DB.
 const nullableDate = () =>
   z
-    .string()
+    .union([z.string(), z.date()])
     .optional()
     .nullable()
     .transform((v) => (v ? new Date(v) : null))
 
-const requiredDate = () => z.string().min(1, "Required").transform((v) => new Date(v))
+const requiredDate = () =>
+  z
+    .union([z.string().min(1, "Required"), z.date()])
+    .transform((v) => new Date(v))
+
+const requiredDateTime = () =>
+  z
+    .union([z.string().min(1, "Required"), z.date()])
+    .transform((v) => new Date(v))
 
 // ---------------------------------------------------------------------------
 
@@ -70,7 +81,7 @@ export const memberSchema = z.object({
   notes: optionalText(1000),
 })
 
-export type MemberInput = z.infer<typeof memberSchema>
+export type MemberInput = z.input<typeof memberSchema>
 
 // ---------------------------------------------------------------------------
 
@@ -103,7 +114,7 @@ export const membershipCreateSchema = z.object({
   notes: optionalText(500),
 })
 
-export type MembershipCreateInput = z.infer<typeof membershipCreateSchema>
+export type MembershipCreateInput = z.input<typeof membershipCreateSchema>
 
 export const membershipRenewSchema = z.object({
   membershipId: z.string().uuid("Invalid membership"),
@@ -116,7 +127,7 @@ export const membershipRenewSchema = z.object({
   expiryDate: z.string().optional().nullable(),
 })
 
-export type MembershipRenewInput = z.infer<typeof membershipRenewSchema>
+export type MembershipRenewInput = z.input<typeof membershipRenewSchema>
 
 // ---------------------------------------------------------------------------
 
@@ -130,7 +141,7 @@ export const paymentSchema = z.object({
   notes: optionalText(500),
 })
 
-export type PaymentInput = z.infer<typeof paymentSchema>
+export type PaymentInput = z.input<typeof paymentSchema>
 
 // ---------------------------------------------------------------------------
 
@@ -156,7 +167,7 @@ export const leadSchema = z.object({
   notes: optionalText(1000),
 })
 
-export type LeadInput = z.infer<typeof leadSchema>
+export type LeadInput = z.input<typeof leadSchema>
 
 export const leadStageSchema = z.object({
   leadId: z.string().uuid("Invalid lead"),
@@ -177,7 +188,7 @@ export type LeadActivityInput = z.infer<typeof leadActivitySchema>
 export const leadConvertSchema = z.object({
   leadId: z.string().uuid("Invalid lead"),
   planId: z.string().uuid("Invalid plan"),
-  startDate: z.string().min(1, "Required").transform((v) => new Date(v)),
+  startDate: requiredDateTime(),
   durationDays: z.number().int().positive(),
   amountMinor: z.number().int().positive("Amount must be positive"),
   method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const),
@@ -192,8 +203,8 @@ export const appointmentSchema = z.object({
   leadId: z.string().uuid().optional().nullable(),
   trainerId: z.string().uuid().optional().nullable(),
   staffId: z.string().uuid().optional().nullable(),
-  startsAt: z.string().min(1, "Required").transform((v) => new Date(v)),
-  endsAt: z.string().min(1, "Required").transform((v) => new Date(v)),
+  startsAt: requiredDateTime(),
+  endsAt: requiredDateTime(),
   status: z.enum(["SCHEDULED", "COMPLETED", "CANCELLED", "NO_SHOW"] as const),
   notes: optionalText(500),
   locationId: z.string().uuid().optional().nullable(),
@@ -203,7 +214,7 @@ export const appointmentSchema = z.object({
   message: "End time must be after start time",
 })
 
-export type AppointmentInput = z.infer<typeof appointmentSchema>
+export type AppointmentInput = z.input<typeof appointmentSchema>
 
 export const appointmentStatusSchema = z.object({
   appointmentId: z.string().uuid("Invalid appointment"),
@@ -224,7 +235,7 @@ export const taskSchema = z.object({
   leadId: z.string().uuid().optional().nullable(),
 })
 
-export type TaskInput = z.infer<typeof taskSchema>
+export type TaskInput = z.input<typeof taskSchema>
 
 export const taskStatusSchema = z.object({
   taskId: z.string().uuid("Invalid task"),

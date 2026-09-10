@@ -201,16 +201,20 @@ export function ReportsPage({ data }: ReportsPageProps) {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10 text-muted-foreground">#</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead className="text-right">Payments</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.paymentMethods.map((p) => {
+                    {data.paymentMethods.map((p, index) => {
                       const config = PAYMENT_METHOD[p.method as keyof typeof PAYMENT_METHOD]
                       return (
                         <TableRow key={p.method}>
+                          <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
                           <TableCell>
                             <StatusBadge tone={config?.tone ?? "muted"}>
                               {config?.label ?? p.method}
@@ -260,18 +264,22 @@ export function ReportsPage({ data }: ReportsPageProps) {
                 {data.leadSources.length === 0 ? (
                   <p className="py-6 text-center text-sm text-muted-foreground">No leads in this period.</p>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Source</TableHead>
-                        <TableHead className="text-right">Leads</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.leadSources.map((l) => {
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10 text-muted-foreground">#</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="text-right">Leads</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.leadSources.map((l, index) => {
                         const config = LEAD_SOURCE[l.source as keyof typeof LEAD_SOURCE]
                         return (
                           <TableRow key={l.source}>
+                            <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                              {index + 1}
+                            </TableCell>
                             <TableCell>
                               <StatusBadge tone={config?.tone ?? "muted"}>
                                 {config?.label ?? l.source}
@@ -313,15 +321,19 @@ export function ReportsPage({ data }: ReportsPageProps) {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-10 text-muted-foreground">#</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Count</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.membershipStatuses.map((m) => {
+                      {data.membershipStatuses.map((m, index) => {
                         const config = MEMBERSHIP_STATUS[m.status as keyof typeof MEMBERSHIP_STATUS]
                         return (
                           <TableRow key={m.status}>
+                            <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                              {index + 1}
+                            </TableCell>
                             <TableCell>
                               <StatusBadge tone={config?.tone ?? "muted"}>
                                 {config?.label ?? m.status}
@@ -349,15 +361,19 @@ export function ReportsPage({ data }: ReportsPageProps) {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-10 text-muted-foreground">#</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Count</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.appointmentStatuses.map((a) => {
+                      {data.appointmentStatuses.map((a, index) => {
                         const config = APPOINTMENT_STATUS[a.status as keyof typeof APPOINTMENT_STATUS]
                         return (
                           <TableRow key={a.status}>
+                            <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                              {index + 1}
+                            </TableCell>
                             <TableCell>
                               <StatusBadge tone={config?.tone ?? "info"}>
                                 {config?.label ?? a.status}

@@ -73,10 +73,10 @@ type PaymentListProps = {
 
 const METHOD_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "All Methods" },
-  { value: "CASH", label: "Cash" },
-  { value: "UPI", label: "UPI" },
-  { value: "CARD", label: "Card" },
-  { value: "BANK_TRANSFER", label: "Bank Transfer" },
+  ...Object.entries(PAYMENT_METHOD).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 export function PaymentList({
@@ -244,6 +244,7 @@ export function PaymentList({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Member</TableHead>
                   <TableHead>Amount</TableHead>
@@ -254,14 +255,18 @@ export function PaymentList({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payments.map((payment) => {
+                {payments.map((payment, index) => {
                   const methodEntry = PAYMENT_METHOD[payment.method]
                   const statusEntry = PAYMENT_STATUS[payment.status]
                   const name = fullName(payment.member.firstName, payment.member.lastName)
                   const voidable = canCreate && payment.status === "RECORDED"
+                  const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
                     <TableRow key={payment.id}>
+                      <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                        {rowNumber}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
                         {formatDate(payment.paymentDate)}
                       </TableCell>

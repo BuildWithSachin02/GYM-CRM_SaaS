@@ -19,7 +19,7 @@ import {
 import { toast } from "sonner"
 
 import { formatDate, formatDateTime, formatMoney, fullName, pluralize } from "@/lib/format"
-import { MEMBER_STATUS, PAYMENT_METHOD } from "@/lib/status"
+import { MEMBERSHIP_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
 import type { MemberStatus, MembershipStatus, PaymentMethod } from "@prisma/client"
 
 import { archiveMember } from "@/lib/actions/members"
@@ -249,6 +249,7 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10 text-muted-foreground">#</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Amount</TableHead>
                       <TableHead>Method</TableHead>
@@ -257,10 +258,13 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {member.payments.map((payment) => {
+                    {member.payments.map((payment, index) => {
                       const methodEntry = PAYMENT_METHOD[payment.method]
                       return (
                         <TableRow key={payment.id}>
+                          <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
                           <TableCell>{formatDate(payment.paymentDate)}</TableCell>
                           <TableCell className="font-medium">
                             {formatMoney(payment.amountMinor)}
@@ -320,14 +324,14 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
               </CardHeader>
               <CardContent className="space-y-3">
                 {member.memberships.map((membership) => {
-                  const membershipStatus =
-                    membership.status === "ACTIVE"
-                      ? { tone: "success" as const, label: "Active" }
-                      : membership.status === "EXPIRED"
-                        ? { tone: "destructive" as const, label: "Expired" }
-                        : membership.status === "PAUSED"
-                          ? { tone: "warning" as const, label: "Paused" }
-                          : { tone: "muted" as const, label: membership.status }
+                  const statusEntry =
+                    MEMBERSHIP_STATUS[
+                      membership.status as keyof typeof MEMBERSHIP_STATUS
+                    ]
+                  const membershipStatus = {
+                    tone: statusEntry?.tone ?? "muted",
+                    label: statusEntry?.label ?? membership.status,
+                  }
 
                   return (
                     <div key={membership.id} className="space-y-2">
@@ -338,7 +342,7 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                         </StatusBadge>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">
-                        <p>Interval: {membership.plan.billingInterval.toLowerCase().replace("_", " ")}</p>
+                        <p>Interval: {PLAN_INTERVAL[membership.plan.billingInterval as keyof typeof PLAN_INTERVAL]?.label ?? membership.plan.billingInterval}</p>
                         <p>Price: {formatMoney(membership.plan.priceMinor)}</p>
                         <p>
                           Duration: {membership.plan.durationDays} {pluralize(membership.plan.durationDays, "day")}

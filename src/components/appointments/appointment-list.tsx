@@ -57,10 +57,10 @@ type Status = (typeof STATUSES)[number]
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  { value: "SCHEDULED", label: "Scheduled" },
-  { value: "COMPLETED", label: "Completed" },
-  { value: "CANCELLED", label: "Cancelled" },
-  { value: "NO_SHOW", label: "No-show" },
+  ...Object.entries(APPOINTMENT_STATUS).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
 ]
 
 type AppointmentListProps = {
@@ -215,6 +215,7 @@ export function AppointmentList({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 text-muted-foreground">#</TableHead>
                 <TableHead>Date &amp; time</TableHead>
                 <TableHead>Subject</TableHead>
                 <TableHead>Type</TableHead>
@@ -224,10 +225,13 @@ export function AppointmentList({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {appointments.map((appt) => {
+              {appointments.map((appt, index) => {
                 const type = appt.memberId ? "MEMBER" : "LEAD"
                 return (
                   <TableRow key={appt.id}>
+                    <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </TableCell>
                     <TableCell>
                       <div className="font-medium">{formatDate(appt.startsAt)}</div>
                       <div className="text-xs text-muted-foreground">

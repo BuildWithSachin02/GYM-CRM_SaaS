@@ -9,6 +9,8 @@ import { toast } from "sonner"
 import { Pencil } from "lucide-react"
 
 import { updateStaff } from "@/lib/actions/settings"
+import { USER_ROLE } from "@/lib/status"
+import type { UserRole } from "@prisma/client"
 import type { StaffData } from "@/components/settings/settings-page"
 
 import { Button } from "@/components/ui/button"
@@ -154,10 +156,13 @@ export function StaffEditForm({ staff, defaultStatus, trigger }: StaffEditFormPr
                           <SelectValue placeholder="Select role" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="OWNER">Owner</SelectItem>
-                          <SelectItem value="ADMIN">Admin</SelectItem>
-                          <SelectItem value="RECEPTIONIST">Receptionist</SelectItem>
-                          <SelectItem value="TRAINER">Trainer</SelectItem>
+                          {(Object.entries(USER_ROLE) as [UserRole, (typeof USER_ROLE)[UserRole]][]).map(
+                            ([value, { label }]) => (
+                              <SelectItem key={value} value={value}>
+                                {label}
+                              </SelectItem>
+                            )
+                          )}
                         </SelectContent>
                       </Select>
                     </FormControl>

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "tsx --test \"tests/*.test.ts\"",
     "seed": "prisma db seed",
+    "db:clean-demo": "tsx prisma/clean-demo.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {

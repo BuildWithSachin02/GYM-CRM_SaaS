@@ -9,6 +9,8 @@ import { toast } from "sonner"
 import { UserPlus } from "lucide-react"
 
 import { createStaff } from "@/lib/actions/settings"
+import { USER_ROLE } from "@/lib/status"
+import type { UserRole } from "@prisma/client"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -163,10 +165,13 @@ export function StaffForm({ orgId: _orgId, trigger }: StaffFormProps) {
                         <SelectValue placeholder="Select role" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="OWNER">Owner</SelectItem>
-                        <SelectItem value="ADMIN">Admin</SelectItem>
-                        <SelectItem value="RECEPTIONIST">Receptionist</SelectItem>
-                        <SelectItem value="TRAINER">Trainer</SelectItem>
+                        {(Object.entries(USER_ROLE) as [UserRole, (typeof USER_ROLE)[UserRole]][]).map(
+                          ([value, { label }]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          )
+                        )}
                       </SelectContent>
                     </Select>
                   </FormControl>

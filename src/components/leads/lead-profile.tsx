@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { EntityCombobox } from "@/components/ui/entity-combobox"
 import {
   Dialog,
   DialogContent,
@@ -143,7 +144,7 @@ export function LeadProfile({
     new Date().toISOString().slice(0, 10)
   )
   const [convertAmount, setConvertAmount] = useState(
-    lead.interestedPlan ? String(lead.interestedPlan.priceMinor) : ""
+    lead.interestedPlan ? String((lead.interestedPlan.priceMinor ?? 0) / 100) : ""
   )
   const [convertMethod, setConvertMethod] = useState<string>("CASH")
   const [convertError, setConvertError] = useState<string | null>(null)
@@ -182,8 +183,11 @@ export function LeadProfile({
       return
     }
 
-    const amountNum = parseInt(convertAmount, 10)
-    if (!amountNum || amountNum <= 0) {
+    const amountNum = parseFloat(convertAmount)
+    const amountMinor = Number.isFinite(amountNum)
+      ? Math.round(amountNum * 100)
+      : 0
+    if (!amountMinor || amountMinor <= 0) {
       setConvertError("Please enter a valid amount")
       return
     }
@@ -194,7 +198,7 @@ export function LeadProfile({
         planId: convertPlanId,
         startDate: convertStartDate,
         durationDays: selectedPlan?.durationDays ?? 30,
-        amountMinor: amountNum,
+        amountMinor,
         method: convertMethod as "CASH" | "UPI" | "CARD" | "BANK_TRANSFER",
       })
 
@@ -478,19 +482,17 @@ export function LeadProfile({
 
             <div className="grid gap-2">
               <Label htmlFor="convert-plan">Plan *</Label>
-              <Select value={convertPlanId} onValueChange={(val) => setConvertPlanId(val ?? "")}>
-                <SelectTrigger id="convert-plan" className="w-full">
-                  <SelectValue placeholder="Select a plan" />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.map((plan) => (
-                    <SelectItem key={plan.id} value={plan.id}>
-                      {plan.name} - {formatMoney(plan.priceMinor)} (
-                      {plan.durationDays} days)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityCombobox
+                value={convertPlanId}
+                onValueChange={setConvertPlanId}
+                options={plans.map((plan) => ({
+                  id: plan.id,
+                  label: plan.name,
+                  sublabel: `${formatMoney(plan.priceMinor)} · ${plan.durationDays} days`,
+                }))}
+                placeholder="Search or select a plan"
+                emptyText="No plans found."
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -504,13 +506,15 @@ export function LeadProfile({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="convert-amount">Amount (paise) *</Label>
+                <Label htmlFor="convert-amount">Amount (₹) *</Label>
                 <Input
                   id="convert-amount"
                   type="number"
+                  step="0.01"
+                  min="0"
                   value={convertAmount}
                   onChange={(e) => setConvertAmount(e.target.value)}
-                  placeholder="e.g. 99900"
+                  placeholder="e.g. 999"
                 />
               </div>
             </div>
