@@ -10,6 +10,7 @@ import type {
   TaskStatus,
   UserRole,
 } from "@prisma/client"
+import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
 export type BadgeTone =
   | "default"
@@ -51,6 +52,22 @@ export const MEMBERSHIP_STATUS: Record<
   { tone: BadgeTone; label: string }
 > = {
   ACTIVE: { tone: "success", label: "Active" },
+  EXPIRED: { tone: "destructive", label: "Expired" },
+  CANCELLED: { tone: "muted", label: "Cancelled" },
+  PAUSED: { tone: "warning", label: "Paused" },
+}
+
+// Date-derived business state shown in memberships UI. ACTIVE here means a
+// membership with more than RENEWAL_WARNING_DAYS remaining; EXPIRING_SOON is
+// the "active, ends within the warning window" state, UPCOMING a start in the
+// future, and EXPIRED an end date that has passed (regardless of DB status).
+export const MEMBERSHIP_LIFECYCLE_STATUS: Record<
+  MembershipLifecycleStatus,
+  { tone: BadgeTone; label: string }
+> = {
+  UPCOMING: { tone: "info", label: "Upcoming" },
+  ACTIVE: { tone: "success", label: "Active" },
+  EXPIRING_SOON: { tone: "warning", label: "Expiring Soon" },
   EXPIRED: { tone: "destructive", label: "Expired" },
   CANCELLED: { tone: "muted", label: "Cancelled" },
   PAUSED: { tone: "warning", label: "Paused" },

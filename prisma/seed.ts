@@ -43,6 +43,8 @@ const DOBS = [
   new Date(1986, 7, 7),
   new Date(1995, 2, 3),
   new Date(1988, 9, 11),
+  new Date(1994, 6, 19),
+  new Date(1991, 11, 29),
 ]
 
 const ADDRESSES = [
@@ -70,27 +72,11 @@ const EMERGENCY_PHONES = [
   "+91 91000 50014",
   "+91 91000 50015",
   "+91 91000 50016",
+  "+91 91000 50017",
+  "+91 91000 50018",
 ]
 
 const PAYMENT_METHODS = ["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const
-const TXN_REFS = [
-  "TXN900100001",
-  "TXN900100002",
-  "TXN900100003",
-  "TXN900100004",
-  "TXN900100005",
-  "TXN900100006",
-  "TXN900100007",
-  "TXN900100008",
-  "TXN900100009",
-  "TXN900100010",
-  "TXN900100011",
-  "TXN900100012",
-  "TXN900100013",
-  "TXN900100014",
-  "TXN900100015",
-  "TXN900100016",
-]
 
 async function findOrCreateOrg() {
   const existing = await prisma.organization.findUnique({ where: { slug: "kings-gym" } })
@@ -272,15 +258,20 @@ async function main() {
   })
 
   // ── Members ─────────────────────────────────────────────────────
+  type Plan = typeof monthly | typeof quarterly | typeof halfYearly | typeof yearly
+  type PeriodSeed = { plan: Plan; startDaysAgo: number; endDaysFromNow: number }
+
   type MemberSeed = {
     first: string
     last: string
     phone: string
     email?: string
     gender: "MALE" | "FEMALE" | "OTHER"
-    plan: typeof monthly | typeof quarterly | typeof halfYearly | typeof yearly
+    plan: Plan
     startDaysAgo: number
     endDaysFromNow: number
+    /** Prior membership records (chronological, oldest first) for this member. */
+    history?: PeriodSeed[]
     trainerId?: string
     source?: "WALK_IN" | "WEBSITE" | "FACEBOOK" | "INSTAGRAM" | "GOOGLE"
   }
@@ -291,12 +282,26 @@ async function main() {
     { first: "Sneha", last: "Iyer", phone: "+91 90000 10002", email: "sneha.iyer@example.com", gender: "FEMALE", plan: yearly, startDaysAgo: 300, endDaysFromNow: 60, trainerId: trainer2.id, source: "INSTAGRAM" },
     { first: "Rahul", last: "Deshmukh", phone: "+91 90000 10003", email: "rahul.d@example.com", gender: "MALE", plan: quarterly, startDaysAgo: 45, endDaysFromNow: 44, trainerId: trainer1.id, source: "GOOGLE" },
     { first: "Pooja", last: "Nair", phone: "+91 90000 10004", email: "pooja.nair@example.com", gender: "FEMALE", plan: halfYearly, startDaysAgo: 120, endDaysFromNow: 60, source: "WALK_IN" },
-    { first: "Karan", last: "Mehta", phone: "+91 90000 10005", email: "karan.mehta@example.com", gender: "MALE", plan: monthly, startDaysAgo: 200, endDaysFromNow: 7, trainerId: trainer1.id, source: "WEBSITE" },
+    // Karan: renewed the same monthly plan twice before (same plan, multiple
+    // records) — his current membership is inside the 7-day renewal window.
+    { first: "Karan", last: "Mehta", phone: "+91 90000 10005", email: "karan.mehta@example.com", gender: "MALE", plan: monthly, startDaysAgo: 23, endDaysFromNow: 7, trainerId: trainer1.id, source: "WEBSITE",
+      history: [
+        { plan: monthly, startDaysAgo: 83, endDaysFromNow: -53 },
+        { plan: monthly, startDaysAgo: 53, endDaysFromNow: -23 },
+      ] },
     { first: "Divya", last: "Reddy", phone: "+91 90000 10006", email: "divya.reddy@example.com", gender: "FEMALE", plan: quarterly, startDaysAgo: 30, endDaysFromNow: 60, trainerId: trainer2.id, source: "FACEBOOK" },
     { first: "Sanjay", last: "Kulkarni", phone: "+91 90000 10007", email: "sanjay.k@example.com", gender: "MALE", plan: yearly, startDaysAgo: 260, endDaysFromNow: 105, source: "WALK_IN" },
     { first: "Ananya", last: "Joshi", phone: "+91 90000 10008", email: "ananya.joshi@example.com", gender: "FEMALE", plan: monthly, startDaysAgo: 245, endDaysFromNow: 3, trainerId: trainer2.id, source: "INSTAGRAM" },
     { first: "Vivek", last: "Shah", phone: "+91 90000 10009", email: "vivek.shah@example.com", gender: "MALE", plan: halfYearly, startDaysAgo: 90, endDaysFromNow: 90, source: "GOOGLE" },
     { first: "Meera", last: "Bhat", phone: "+91 90000 10010", email: "meera.bhat@example.com", gender: "FEMALE", plan: quarterly, startDaysAgo: 60, endDaysFromNow: 30, source: "FACEBOOK" },
+    // Lavanya: two prior monthly memberships (history) + a current quarterly.
+    { first: "Lavanya", last: "Pandey", phone: "+91 90000 10017", email: "lavanya.pandey@example.com", gender: "FEMALE", plan: quarterly, startDaysAgo: 60, endDaysFromNow: 30, trainerId: trainer2.id, source: "WALK_IN",
+      history: [
+        { plan: monthly, startDaysAgo: 120, endDaysFromNow: -90 },
+        { plan: monthly, startDaysAgo: 90, endDaysFromNow: -60 },
+      ] },
+    // Mehul: signed up — his membership is UPCOMING (starts 5 days from now).
+    { first: "Mehul", last: "Rastogi", phone: "+91 90000 10018", email: "mehul.rastogi@example.com", gender: "MALE", plan: monthly, startDaysAgo: -5, endDaysFromNow: 35, source: "WEBSITE" },
     // Expired members
     { first: "Rakesh", last: "Gupta", phone: "+91 90000 10011", email: "rakesh.gupta@example.com", gender: "MALE", plan: monthly, startDaysAgo: 90, endDaysFromNow: -60, source: "WALK_IN" },
     { first: "Farhan", last: "Khan", phone: "+91 90000 10012", email: "farhan.khan@example.com", gender: "MALE", plan: quarterly, startDaysAgo: 160, endDaysFromNow: -50, trainerId: trainer1.id, source: "GOOGLE" },
@@ -308,6 +313,8 @@ async function main() {
   ]
 
   const members = []
+  let createdMembershipCount = 0
+  let createdPaymentCount = 0
   for (let i = 0; i < memberSeeds.length; i++) {
     const s = memberSeeds[i]
     const member = await prisma.member.create({
@@ -329,34 +336,49 @@ async function main() {
       },
     })
 
-    const startDate = daysFromNow(-s.startDaysAgo)
-    const endDate = daysFromNow(s.endDaysFromNow)
+    // One membership + payment per period: history records first (oldest →
+    // newest), then the current period. Renewals are never overwritten — they
+    // become separate (EXPIRED) records, exactly like real renewals.
+    const periods: PeriodSeed[] = [
+      ...(s.history ?? []),
+      { plan: s.plan, startDaysAgo: s.startDaysAgo, endDaysFromNow: s.endDaysFromNow },
+    ]
 
-    const membership = await prisma.membership.create({
-      data: {
-        organizationId: org.id,
-        memberId: member.id,
-        planId: s.plan.id,
-        status: s.endDaysFromNow < 0 ? "EXPIRED" : "ACTIVE",
-        startDate,
-        endDate,
-        amountMinor: s.plan.priceMinor,
-      },
-    })
+    let paymentCounter = 0
+    for (const period of periods) {
+      const startDate = daysFromNow(-period.startDaysAgo)
+      const endDate = daysFromNow(period.endDaysFromNow)
+      const isCurrent = period === periods[periods.length - 1]
 
-    await prisma.payment.create({
-      data: {
-        organizationId: org.id,
-        memberId: member.id,
-        membershipId: membership.id,
-        amountMinor: s.plan.priceMinor,
-        method: PAYMENT_METHODS[i % PAYMENT_METHODS.length],
-        reference: TXN_REFS[i],
-        paymentDate: startDate,
-        recordedById: [owner.id, admin.id, reception.id][i % 3],
-        notes: `Initial payment — ${s.plan.name} plan`,
-      },
-    })
+      const membership = await prisma.membership.create({
+        data: {
+          organizationId: org.id,
+          memberId: member.id,
+          planId: period.plan.id,
+          status: endDate.getTime() < now.getTime() ? "EXPIRED" : "ACTIVE",
+          startDate,
+          endDate,
+          amountMinor: period.plan.priceMinor,
+        },
+      })
+
+      await prisma.payment.create({
+        data: {
+          organizationId: org.id,
+          memberId: member.id,
+          membershipId: membership.id,
+          amountMinor: period.plan.priceMinor,
+          method: PAYMENT_METHODS[i % PAYMENT_METHODS.length],
+          reference: `TXN9001${String(100001 + paymentCounter + i * 100)}`,
+          paymentDate: startDate,
+          recordedById: [owner.id, admin.id, reception.id][i % 3],
+          notes: `${isCurrent ? "Initial" : "Renewal"} payment — ${period.plan.name} plan`,
+        },
+      })
+      paymentCounter++
+      createdMembershipCount++
+      createdPaymentCount++
+    }
 
     members.push(member)
   }
@@ -365,7 +387,8 @@ async function main() {
   const todayKeyVal = dayKey(now)
   for (let i = 0; i < memberSeeds.length; i++) {
     const s = memberSeeds[i]
-    if (s.endDaysFromNow <= 0) continue // only active members
+    if (s.endDaysFromNow <= 0) continue // only members with a live membership
+    if (s.startDaysAgo < 0) continue // upcoming memberships (start in the future) have no check-ins yet
 
     // Today's check-in: all except every 3rd
     if (i % 3 !== 2) {
@@ -650,8 +673,8 @@ async function main() {
   console.log("")
   console.log(`Members: ${memberSeeds.length} total (${activeCount} active, ${expiredCount} expired, ${inactiveCount} inactive)`)
   console.log(`Plans: 4 (Monthly, Quarterly, Half Yearly, Yearly)`)
-  console.log(`Memberships: ${memberSeeds.length}`)
-  console.log(`Payments: ${memberSeeds.length}`)
+  console.log(`Memberships: ${createdMembershipCount}`)
+  console.log(`Payments: ${createdPaymentCount}`)
   console.log(`Leads: ${leadSeeds.length} (1 converted)`)
   console.log(`Appointments: 5 (4 scheduled, 1 completed)`)
   console.log(`Tasks: 6 (4 todo, 1 in-progress, 0 completed)`)

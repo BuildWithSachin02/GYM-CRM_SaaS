@@ -9,7 +9,7 @@ import { toast } from "sonner"
 
 import { renewMembership } from "@/lib/actions/memberships"
 import { formatDate, formatMoney } from "@/lib/format"
-import { dayAfterYmd } from "@/lib/memberships"
+import { earliestRenewalStartKey } from "@/lib/memberships"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -64,12 +64,16 @@ type RenewalFormProps = {
     planId: string
     planName: string
     endDate: string
+    /** Date-derived lifecycle of the membership being renewed. */
+    status: "EXPIRED" | "EXPIRING_SOON"
   }
+  /** Business date (YYYY-MM-DD) in the org's timezone, from the server. */
+  todayKey: string
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   trigger?: React.ReactNode
 }
 
-export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
+export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -80,7 +84,18 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
     [plans, membership.planId]
   )
 
-  const suggestedStart = useMemo(() => dayAfterYmd(membership.endDate.slice(0, 10)), [membership.endDate])
+  // Expired memberships renew from today (no 7-day grace). Memberships still
+  // in the warning window renew after the current period ends (no overlap),
+  // which is the day after the end date.
+  const suggestedStart = useMemo(
+    () =>
+      earliestRenewalStartKey(
+        membership.status,
+        membership.endDate.slice(0, 10),
+        todayKey
+      ),
+    [membership.status, membership.endDate, todayKey]
+  )
 
   const form = useForm<RenewalFormValues>({
     resolver: zodResolver(renewalFormSchema),
@@ -171,8 +186,18 @@ export function RenewalForm({ membership, plans, trigger }: RenewalFormProps) {
             <FormServerError>{serverError}</FormServerError>
 
             <p className="text-sm text-muted-foreground">
-              Current membership ends {formatDate(membership.endDate)}. Renewal
-              begins {suggestedStart} unless you change the start date.
+              {membership.status === "EXPIRED" ? (
+                <>
+                  Current membership ended {formatDate(membership.endDate)}. Renewal
+                  begins {suggestedStart} (today) unless you change the start date.
+                </>
+              ) : (
+                <>
+                  Current membership ends {formatDate(membership.endDate)}. Renewal
+                  begins {suggestedStart} (back-to-back, no overlap) unless you change
+                  the start date.
+                </>
+              )}
             </p>
 
             <FormField

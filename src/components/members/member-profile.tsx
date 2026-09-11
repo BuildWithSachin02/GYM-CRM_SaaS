@@ -19,8 +19,9 @@ import {
 import { toast } from "sonner"
 
 import { formatDate, formatDateTime, formatMoney, fullName, pluralize } from "@/lib/format"
-import { MEMBERSHIP_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
-import type { MemberStatus, MembershipStatus, PaymentMethod } from "@prisma/client"
+import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
+import type { MemberStatus, PaymentMethod } from "@prisma/client"
+import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
 import { archiveMember } from "@/lib/actions/members"
 import { PageHeader } from "@/components/common/page-header"
@@ -65,7 +66,9 @@ type MemberProfileProps = {
       id: string
       startDate: string
       endDate: string
-      status: MembershipStatus
+      status: MembershipLifecycleStatus
+      daysLeft: number | null
+      daysUntilStart: number | null
       plan: {
         name: string
         billingInterval: string
@@ -319,19 +322,23 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <FileText className="size-4" /> Active Membership
+                  <FileText className="size-4" /> Memberships
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {member.memberships.map((membership) => {
                   const statusEntry =
-                    MEMBERSHIP_STATUS[
-                      membership.status as keyof typeof MEMBERSHIP_STATUS
-                    ]
+                    MEMBERSHIP_LIFECYCLE_STATUS[membership.status]
                   const membershipStatus = {
                     tone: statusEntry?.tone ?? "muted",
                     label: statusEntry?.label ?? membership.status,
                   }
+                  const lifecycleNote =
+                    membership.status === "EXPIRING_SOON" && membership.daysLeft !== null
+                      ? ` · ${membership.daysLeft}d left`
+                      : membership.status === "UPCOMING" && membership.daysUntilStart !== null
+                        ? ` · starts in ${membership.daysUntilStart}d`
+                        : ""
 
                   return (
                     <div key={membership.id} className="space-y-2">
@@ -339,6 +346,7 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                         <span className="text-sm font-medium">{membership.plan.name}</span>
                         <StatusBadge tone={membershipStatus.tone}>
                           {membershipStatus.label}
+                          {lifecycleNote}
                         </StatusBadge>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">

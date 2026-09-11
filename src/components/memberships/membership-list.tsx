@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Users, Plus, SearchIcon, Clock, XCircle } from "lucide-react"
-import type { MembershipStatus } from "@prisma/client"
+import { Users, Plus, SearchIcon, Clock, XCircle, History } from "lucide-react"
+import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
 import { formatDate } from "@/lib/format"
-import { MEMBERSHIP_STATUS } from "@/lib/status"
+import { MEMBERSHIP_LIFECYCLE_STATUS } from "@/lib/status"
 
 import { PageHeader } from "@/components/common/page-header"
 import { StatCard } from "@/components/common/stat-card"
@@ -41,8 +41,10 @@ type SerializedMembership = {
   planName: string
   startDate: string
   endDate: string
-  status: MembershipStatus
+  status: MembershipLifecycleStatus
   daysLeft: number | null
+  /** Total membership records for this member (1 = no history). */
+  historyCount: number
 }
 
 type MembershipListProps = {
@@ -54,11 +56,13 @@ type MembershipListProps = {
   members: { id: string; firstName: string; lastName: string }[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   canManage: boolean
+  /** Business date (YYYY-MM-DD) in the org's timezone. */
+  todayKey: string
 }
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "All" },
-  ...Object.entries(MEMBERSHIP_STATUS).map(([value, { label }]) => ({
+  ...Object.entries(MEMBERSHIP_LIFECYCLE_STATUS).map(([value, { label }]) => ({
     value,
     label,
   })),
@@ -73,6 +77,7 @@ export function MembershipList({
   members,
   plans,
   canManage,
+  todayKey,
 }: MembershipListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -93,6 +98,7 @@ export function MembershipList({
           params.delete("q")
         }
         params.delete("page")
+        params.delete("member")
         startTransition(() => {
           router.push(`/dashboard/memberships?${params.toString()}`)
         })
@@ -115,6 +121,7 @@ export function MembershipList({
       params.delete("status")
     }
     params.delete("page")
+    params.delete("member")
     startTransition(() => {
       router.push(`/dashboard/memberships?${params.toString()}`)
     })
@@ -136,7 +143,7 @@ export function MembershipList({
     <div className="space-y-6">
       <PageHeader
         title="Memberships"
-        description={`${totalCount} ${totalCount === 1 ? "membership" : "memberships"} total`}
+        description={`${totalCount} ${totalCount === 1 ? "member" : "members"} with memberships (one current membership per member)`}
         actions={
           canManage ? (
             <MembershipForm
@@ -179,7 +186,7 @@ export function MembershipList({
           />
         </div>
 
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {STATUS_TABS.map((tab) => (
             <Button
               key={tab.value}
@@ -228,12 +235,11 @@ export function MembershipList({
                 {memberships.map((m, index) => {
                   const canRenew =
                     canManage &&
-                    (m.status === "EXPIRED" ||
-                      (m.status === "ACTIVE" && m.daysLeft !== null && m.daysLeft <= 7))
+                    (m.status === "EXPIRED" || m.status === "EXPIRING_SOON")
                   const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
-                    <TableRow key={m.id}>
+                    <TableRow key={m.memberId}>
                       <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
                         {rowNumber}
                       </TableCell>
@@ -244,6 +250,11 @@ export function MembershipList({
                         >
                           {m.memberName}
                         </Link>
+                        {m.historyCount > 1 && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {m.historyCount} records
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {m.planName}
@@ -256,30 +267,46 @@ export function MembershipList({
                       </TableCell>
                       <TableCell>
                         <StatusBadge
-                          tone={MEMBERSHIP_STATUS[m.status]?.tone ?? "muted"}
+                          tone={
+                            MEMBERSHIP_LIFECYCLE_STATUS[m.status]?.tone ?? "muted"
+                          }
                         >
-                          {MEMBERSHIP_STATUS[m.status]?.label ?? m.status}
+                          {MEMBERSHIP_LIFECYCLE_STATUS[m.status]?.label ?? m.status}
                         </StatusBadge>
+                        {m.status === "EXPIRING_SOON" && m.daysLeft !== null && (
+                          <span className="ml-1.5 text-xs text-muted-foreground">
+                            {m.daysLeft}d
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {canRenew && (
-                          <RenewalForm
-                            membership={{
-                              id: m.id,
-                              memberId: m.memberId,
-                              memberName: m.memberName,
-                              planId: m.planId,
-                              planName: m.planName,
-                              endDate: m.endDate,
-                            }}
-                            plans={plans}
-                            trigger={
-                              <Button variant="outline" size="sm">
-                                Renew
-                              </Button>
-                            }
-                          />
-                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {m.historyCount > 1 && (
+                            <Button variant="ghost" size="sm" render={<Link href={`/dashboard/memberships?member=${m.memberId}`} />}>
+                              <History className="size-4" /> History
+                            </Button>
+                          )}
+                          {canRenew && (
+                            <RenewalForm
+                              membership={{
+                                id: m.id,
+                                memberId: m.memberId,
+                                memberName: m.memberName,
+                                planId: m.planId,
+                                planName: m.planName,
+                                endDate: m.endDate,
+                                status: m.status === "EXPIRING_SOON" ? "EXPIRING_SOON" : "EXPIRED",
+                              }}
+                              todayKey={todayKey}
+                              plans={plans}
+                              trigger={
+                                <Button variant="outline" size="sm">
+                                  Renew
+                                </Button>
+                              }
+                            />
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )

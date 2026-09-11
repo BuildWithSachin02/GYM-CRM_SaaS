@@ -21,7 +21,7 @@ export default async function ReportsServerPage({
   const params = await searchParams
 
   const range = params.range === "90" ? "90" : "30"
-  const data = await getReportsData(user.organizationId, range)
+  const data = await getReportsData(user.organizationId, range, user.organization.timezone)
 
   return <ReportsPage data={data} />
 }

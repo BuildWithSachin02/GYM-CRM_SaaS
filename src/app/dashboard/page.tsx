@@ -82,7 +82,7 @@ function initialsOf(first: string, last: string) {
 
 export default async function DashboardPage() {
   const user = await requireUser()
-  const data = await getDashboardData(user.organizationId)
+  const data = await getDashboardData(user.organizationId, user.organization.timezone)
   const s = data.stats
   const canManage = can(user, "members:create")
 
@@ -115,7 +115,7 @@ export default async function DashboardPage() {
         <StatCard
           label="Expiring in 7 days"
           value={s.expiringSoon7}
-          hint="memberships due soon"
+          hint="members due soon"
           icon={Clock}
           iconClassName="bg-amber-500/10 text-amber-600 dark:text-amber-400"
         />

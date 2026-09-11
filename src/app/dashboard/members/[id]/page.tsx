@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getMembershipLifecycle } from "@/lib/memberships"
 
 import { MemberProfile } from "@/components/members/member-profile"
 
@@ -48,9 +49,8 @@ export default async function MemberDetailPage({ params }: PageProps) {
       createdAt: true,
       updatedAt: true,
       memberships: {
-        where: { status: "ACTIVE" },
-        orderBy: { createdAt: "desc" },
-        take: 1,
+        orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
+        take: 3,
         select: {
           id: true,
           startDate: true,
@@ -97,11 +97,22 @@ export default async function MemberDetailPage({ params }: PageProps) {
     createdAt: member.createdAt.toISOString(),
     updatedAt: member.updatedAt.toISOString(),
     dateOfBirth: member.dateOfBirth?.toISOString() ?? null,
-    memberships: member.memberships.map((m) => ({
-      ...m,
-      startDate: m.startDate.toISOString(),
-      endDate: m.endDate.toISOString(),
-    })),
+    memberships: member.memberships.map((m) => {
+      const lifecycle = getMembershipLifecycle({
+        startDate: m.startDate,
+        endDate: m.endDate,
+        status: m.status,
+        timeZone: user.organization.timezone,
+      })
+      return {
+        ...m,
+        startDate: m.startDate.toISOString(),
+        endDate: m.endDate.toISOString(),
+        status: lifecycle.status,
+        daysLeft: lifecycle.daysLeft,
+        daysUntilStart: lifecycle.daysUntilStart,
+      }
+    }),
     payments: member.payments.map((p) => ({
       ...p,
       paymentDate: p.paymentDate.toISOString(),

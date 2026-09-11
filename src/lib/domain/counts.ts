@@ -2,6 +2,7 @@ import "server-only"
 
 import { prisma } from "@/lib/prisma"
 import { dayKeyOf } from "@/lib/format"
+import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
 
 export type SidebarCounts = {
   members: number
@@ -19,13 +20,22 @@ export type SidebarCounts = {
  * Returns live counts for sidebar navigation badges.
  * All queries are scoped to the authenticated user's organization.
  */
-export async function getSidebarCounts(organizationId: string): Promise<SidebarCounts> {
+export async function getSidebarCounts(
+  organizationId: string,
+  timeZone: string
+): Promise<SidebarCounts> {
   const todayKey = dayKeyOf(new Date())
   const now = new Date()
 
+  // Active memberships = records whose business state is ACTIVE or within the
+  // renewal warning window (date-derived, so stale "ACTIVE" rows whose end
+  // date passed are not counted).
+  const lifecycleStats = await getMembershipLifecycleStats(organizationId, timeZone)
+  const activeMemberships =
+    lifecycleStats.records.ACTIVE + lifecycleStats.records.EXPIRING_SOON
+
   const [
     members,
-    activeMemberships,
     plans,
     payments,
     todayAttendance,
@@ -36,9 +46,6 @@ export async function getSidebarCounts(organizationId: string): Promise<SidebarC
   ] = await Promise.all([
     prisma.member.count({
       where: { organizationId, deletedAt: null },
-    }),
-    prisma.membership.count({
-      where: { organizationId, status: "ACTIVE" },
     }),
     prisma.membershipPlan.count({
       where: { organizationId, active: true },

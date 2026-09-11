@@ -1,10 +1,19 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import {
+  dayKeyInTimeZone,
+  getMembershipLifecycle,
+  LIFECYCLE_STATUS_ORDER,
+  type MembershipLifecycleStatus,
+} from "@/lib/memberships"
+import { getMembershipLifecycleStats, pickPrimaryMembership } from "@/lib/domain/memberships"
 
 import { MembershipList } from "@/components/memberships/membership-list"
+import { MembershipHistory } from "@/components/memberships/membership-history"
 
 export const metadata: Metadata = {
   title: "Memberships",
@@ -14,7 +23,41 @@ type SearchParams = Promise<{
   q?: string
   status?: string
   page?: string
+  member?: string
 }>
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isLifecycleStatus = (v: string): v is MembershipLifecycleStatus =>
+  (LIFECYCLE_STATUS_ORDER as readonly string[]).includes(v)
+
+function serializeHistoryRows(
+  rows: Array<{
+    id: string
+    startDate: Date
+    endDate: Date
+    status: string
+    plan: { id: string; name: string }
+  }>,
+  timeZone: string
+) {
+  return rows.map((m) => {
+    const lifecycle = getMembershipLifecycle({
+      startDate: m.startDate,
+      endDate: m.endDate,
+      status: m.status,
+      timeZone,
+    })
+    return {
+      id: m.id,
+      planId: m.plan.id,
+      planName: m.plan.name,
+      startDate: m.startDate.toISOString(),
+      endDate: m.endDate.toISOString(),
+      status: lifecycle.status,
+      daysLeft: lifecycle.daysLeft,
+    }
+  })
+}
 
 export default async function MembershipsPage({
   searchParams,
@@ -23,106 +66,128 @@ export default async function MembershipsPage({
 }) {
   const user = await requireUser()
   const params = await searchParams
+  const timeZone = user.organization.timezone
+  const todayKey = dayKeyInTimeZone(new Date(), timeZone)
+  const canManage = can(user, "memberships:manage")
 
   const q = params.q?.trim() || ""
-  const statusFilter = params.status?.trim() || ""
   const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1)
   const pageSize = 25
-  const skip = (page - 1) * pageSize
 
-  const where: Record<string, unknown> = {
-    organizationId: user.organizationId,
+  const plans = await prisma.membershipPlan.findMany({
+    where: { organizationId: user.organizationId, active: true },
+    orderBy: { priceMinor: "asc" },
+    select: { id: true, name: true, priceMinor: true, durationDays: true },
+  })
+
+  const memberFilter = params.member?.trim()
+  if (memberFilter) {
+    const target = UUID_RE.test(memberFilter)
+      ? await prisma.member.findFirst({
+          where: {
+            id: memberFilter,
+            organizationId: user.organizationId,
+            deletedAt: null,
+          },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null
+    if (!target) notFound()
+
+    const rows = await prisma.membership.findMany({
+      where: { organizationId: user.organizationId, memberId: target.id },
+      include: { plan: { select: { id: true, name: true } } },
+      orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { createdAt: "desc" }],
+    })
+
+    return (
+      <MembershipHistory
+        memberId={target.id}
+        memberName={`${target.firstName} ${target.lastName}`.trim()}
+        memberships={serializeHistoryRows(rows, timeZone)}
+        plans={plans}
+        canManage={canManage}
+        todayKey={todayKey}
+      />
+    )
   }
 
-  if (statusFilter && ["ACTIVE", "EXPIRED", "CANCELLED", "PAUSED"].includes(statusFilter)) {
-    where.status = statusFilter
+  const statusFilter = params.status?.trim() || ""
+  const memberships = await prisma.membership.findMany({
+    where: {
+      organizationId: user.organizationId,
+    },
+    include: {
+      member: { select: { id: true, firstName: true, lastName: true } },
+      plan: { select: { id: true, name: true } },
+    },
+    orderBy: [{ member: { firstName: "asc" } }, { member: { lastName: "asc" } }],
+  })
+
+  const rowsByMember = new Map<string, Array<(typeof memberships)[number]>>()
+  for (const row of memberships) {
+    const list = rowsByMember.get(row.memberId) ?? []
+    list.push(row)
+    rowsByMember.set(row.memberId, list)
   }
 
-  if (q) {
-    where.member = {
-      OR: [
-        { firstName: { contains: q, mode: "insensitive" } },
-        { lastName: { contains: q, mode: "insensitive" } },
-      ],
+  const stats = await getMembershipLifecycleStats(user.organizationId, timeZone)
+
+  const entries = []
+  for (const [memberId, rows] of rowsByMember) {
+    const primary = pickPrimaryMembership(rows, timeZone)
+    if (!primary || primary.row.memberId !== memberId) continue
+
+    const member = primary.row.member
+    const memberName = `${member.firstName} ${member.lastName}`.trim()
+    if (q && !memberName.toLowerCase().includes(q.toLowerCase())) continue
+    if (statusFilter) {
+      if (!isLifecycleStatus(statusFilter)) continue
+      if (primary.lifecycle.status !== statusFilter) continue
     }
+
+    entries.push({
+      id: primary.row.id,
+      memberId,
+      memberName,
+      planId: primary.row.plan.id,
+      planName: primary.row.plan.name,
+      startDate: primary.row.startDate.toISOString(),
+      endDate: primary.row.endDate.toISOString(),
+      status: primary.lifecycle.status,
+      daysLeft: primary.lifecycle.daysLeft,
+      historyCount: rows.length,
+    })
   }
 
-  const now = new Date()
-  const in7Days = new Date(now)
-  in7Days.setDate(in7Days.getDate() + 7)
+  entries.sort((a, b) => a.memberName.localeCompare(b.memberName, "en"))
 
-  const [memberships, totalCount, activeCount, expiringCount, expiredCount, members, plans] =
-    await Promise.all([
-      prisma.membership.findMany({
-        where,
-        include: {
-          member: { select: { id: true, firstName: true, lastName: true } },
-          plan: { select: { id: true, name: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: pageSize,
-      }),
-      prisma.membership.count({ where }),
-      prisma.membership.count({
-        where: { organizationId: user.organizationId, status: "ACTIVE" },
-      }),
-      prisma.membership.count({
-        where: {
-          organizationId: user.organizationId,
-          status: "ACTIVE",
-          endDate: { gte: now, lte: in7Days },
-        },
-      }),
-      prisma.membership.count({
-        where: { organizationId: user.organizationId, status: "EXPIRED" },
-      }),
-      prisma.member.findMany({
-        where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
-        orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-        select: { id: true, firstName: true, lastName: true },
-      }),
-      prisma.membershipPlan.findMany({
-        where: { organizationId: user.organizationId, active: true },
-        orderBy: { priceMinor: "asc" },
-        select: { id: true, name: true, priceMinor: true, durationDays: true },
-      }),
-    ])
+  const totalCount = entries.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const pageEntries = entries.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
-  const serializedMemberships = memberships.map((m) => ({
-    id: m.id,
-    memberId: m.memberId,
-    memberName: `${m.member.firstName} ${m.member.lastName}`.trim(),
-    planId: m.plan.id,
-    planName: m.plan.name,
-    startDate: m.startDate.toISOString(),
-    endDate: m.endDate.toISOString(),
-    status: m.status,
-    daysLeft:
-      m.status === "ACTIVE"
-        ? Math.max(
-            0,
-            Math.ceil((m.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-          )
-        : null,
-  }))
-
-  const totalPages = Math.ceil(totalCount / pageSize)
+  const members = await prisma.member.findMany({
+    where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
+    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    select: { id: true, firstName: true, lastName: true },
+  })
 
   return (
     <MembershipList
-      memberships={serializedMemberships}
+      memberships={pageEntries}
       totalCount={totalCount}
       totalPages={totalPages}
-      filters={{ q, status: statusFilter, page }}
+      filters={{ q, status: statusFilter, page: currentPage }}
       stats={{
-        totalActive: activeCount,
-        expiringIn7Days: expiringCount,
-        expired: expiredCount,
+        totalActive: stats.members.ACTIVE,
+        expiringIn7Days: stats.members.EXPIRING_SOON,
+        expired: stats.members.EXPIRED,
       }}
       members={members}
       plans={plans}
-      canManage={can(user, "memberships:manage")}
+      canManage={canManage}
+      todayKey={todayKey}
     />
   )
 }

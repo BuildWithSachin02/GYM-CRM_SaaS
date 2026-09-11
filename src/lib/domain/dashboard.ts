@@ -9,6 +9,7 @@ import {
 
 import { prisma } from "@/lib/prisma"
 import { dayKeyOf } from "@/lib/format"
+import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -76,26 +77,23 @@ export type DashboardData = {
   nextWeekAppointments: { id: string; title: string; startsAt: string }[]
 }
 
-export async function getDashboardData(organizationId: string): Promise<DashboardData> {
+export async function getDashboardData(
+  organizationId: string,
+  timeZone: string
+): Promise<DashboardData> {
   const todayStart = startOfDay(new Date())
   const todayEnd = endOfDay(new Date())
   const todayKey = dayKeyOf(new Date())
 
-  const [totalMembers, activeMembers, expiringSoon7, expiredCount, todayAttendance, todayRevenue, newLeads, pendingFollowUps] =
+  // Membership counts are date-derived (unique members, not records): a member
+  // who renewed several times counts once. Record-level counts live in reports.
+  const lifecycleStats = await getMembershipLifecycleStats(organizationId, timeZone)
+
+  const [totalMembers, activeMembers, todayAttendance, todayRevenue, newLeads, pendingFollowUps] =
     await Promise.all([
       prisma.member.count({ where: { organizationId, deletedAt: null } }),
       prisma.member.count({
         where: { organizationId, deletedAt: null, status: "ACTIVE" },
-      }),
-      prisma.membership.count({
-        where: {
-          organizationId,
-          status: "ACTIVE",
-          endDate: { gte: todayStart, lte: endOfDay(addDays(todayStart, 7)) },
-        },
-      }),
-      prisma.membership.count({
-        where: { organizationId, status: "EXPIRED", endDate: { lt: todayStart } },
       }),
       prisma.checkIn.count({ where: { organizationId, dayKey: todayKey } }),
       prisma.payment.aggregate({
@@ -132,8 +130,8 @@ export async function getDashboardData(organizationId: string): Promise<Dashboar
     stats: {
       totalMembers,
       activeMembers,
-      expiringSoon7,
-      expiredCount,
+      expiringSoon7: lifecycleStats.members.EXPIRING_SOON,
+      expiredCount: lifecycleStats.members.EXPIRED,
       todayAttendance,
       todayRevenue: todayRevenue._sum.amountMinor ?? 0,
       newLeads,
@@ -195,10 +193,12 @@ async function getAttendanceTrend(organizationId: string) {
 }
 
 async function getExpiringMemberships(organizationId: string, todayStart: Date) {
+  const todayEnd = endOfDay(todayStart)
   const rows = await prisma.membership.findMany({
     where: {
       organizationId,
       status: "ACTIVE",
+      startDate: { lte: todayEnd },
       endDate: { gte: todayStart, lte: endOfDay(addDays(todayStart, 30)) },
     },
     orderBy: { endDate: "asc" },

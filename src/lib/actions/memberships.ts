@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow } from "@/lib/auth/auth"
 import { can } from "@/lib/permissions"
+import { BusinessRuleError } from "@/lib/errors"
 import { formatDate } from "@/lib/format"
 import {
   membershipCreateSchema,
@@ -15,7 +16,12 @@ import {
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import {
   addDurationDays,
+  canRenewLifecycle,
+  dayKeyInTimeZone,
+  earliestRenewalStartKey,
   findOverlappingActiveMembership,
+  getMembershipLifecycle,
+  RENEWAL_WARNING_DAYS,
 } from "@/lib/memberships"
 
 export type MembershipActionResult =
@@ -60,86 +66,97 @@ export async function createMembership(
     }),
     prisma.membershipPlan.findFirst({
       where: { id: data.planId, organizationId: user.organizationId, active: true },
-      select: { id: true },
+      select: { id: true, name: true, durationDays: true },
     }),
   ])
 
   if (!member) return { success: false, error: "Member not found" }
   if (!plan) return { success: false, error: "Selected plan is not available for your gym" }
 
-  const endDate = addDurationDays(data.startDate, data.durationDays)
+  const endDate = addDurationDays(data.startDate, plan.durationDays)
 
-  const overlap = await findOverlappingActiveMembership(
-    prisma,
-    user.organizationId,
-    data.memberId,
-    data.startDate,
-    endDate
-  )
-  if (overlap) {
-    return {
-      success: false,
-      error: `This member already has an active membership (${overlap.plan.name}, ${formatDate(
-        overlap.startDate
-      )} – ${formatDate(overlap.endDate)}) that overlaps this period. Use "Renew" on that membership, or choose a non-overlapping start date.`,
+  try {
+    const membershipId = await prisma.$transaction(async (tx) => {
+      // Serialize concurrent submissions for the same member, then re-check
+      // overlap inside the transaction so two redirect requests cannot both
+      // create overlapping active memberships.
+      await tx.$queryRaw`SELECT 1 FROM "Member" WHERE "id" = ${data.memberId} FOR UPDATE`
+
+      const overlap = await findOverlappingActiveMembership(
+        tx,
+        user.organizationId,
+        data.memberId,
+        data.startDate,
+        endDate
+      )
+      if (overlap) {
+        throw new BusinessRuleError(
+          `This member already has an active membership (${overlap.plan.name}, ${formatDate(
+            overlap.startDate
+          )} – ${formatDate(overlap.endDate)}) that overlaps this period. Use "Renew" on that membership, or choose a non-overlapping start date.`
+        )
+      }
+
+      // Close any ACTIVE memberships that already ended before this new period.
+      await tx.membership.updateMany({
+        where: {
+          organizationId: user.organizationId,
+          memberId: data.memberId,
+          status: "ACTIVE",
+          endDate: { lt: data.startDate },
+        },
+        data: { status: "EXPIRED" },
+      })
+
+      const membership = await tx.membership.create({
+        data: {
+          organizationId: user.organizationId,
+          memberId: data.memberId,
+          planId: data.planId,
+          startDate: data.startDate,
+          endDate,
+          amountMinor: data.amountMinor,
+          status: "ACTIVE",
+          notes: data.notes ?? null,
+        },
+        select: { id: true },
+      })
+
+      await tx.payment.create({
+        data: {
+          organizationId: user.organizationId,
+          memberId: data.memberId,
+          membershipId: membership.id,
+          amountMinor: data.amountMinor,
+          method: data.method,
+          status: "RECORDED",
+          recordedById: user.id,
+          notes: data.notes ?? null,
+        },
+      })
+
+      return membership.id
+    })
+
+    await writeAudit({
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: AUDIT_ACTIONS.MEMBERSHIP_CREATED,
+      entityType: "Membership",
+      entityId: membershipId,
+      after: { ...data, id: membershipId, endDate: endDate.toISOString() },
+    })
+
+    revalidatePath("/dashboard/memberships")
+    revalidatePath(`/dashboard/members/${data.memberId}`)
+
+    return { success: true, data: { id: membershipId } }
+  } catch (error) {
+    if (error instanceof BusinessRuleError) {
+      return { success: false, error: error.message }
     }
+    throw error
   }
-
-  const membershipId = await prisma.$transaction(async (tx) => {
-    // Close any ACTIVE memberships that already ended before this new period.
-    await tx.membership.updateMany({
-      where: {
-        organizationId: user.organizationId,
-        memberId: data.memberId,
-        status: "ACTIVE",
-        endDate: { lt: data.startDate },
-      },
-      data: { status: "EXPIRED" },
-    })
-
-    const membership = await tx.membership.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: data.memberId,
-        planId: data.planId,
-        startDate: data.startDate,
-        endDate,
-        amountMinor: data.amountMinor,
-        status: "ACTIVE",
-        notes: data.notes ?? null,
-      },
-      select: { id: true },
-    })
-
-    await tx.payment.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: data.memberId,
-        membershipId: membership.id,
-        amountMinor: data.amountMinor,
-        method: data.method,
-        status: "RECORDED",
-        recordedById: user.id,
-        notes: data.notes ?? null,
-      },
-    })
-
-    return membership.id
-  })
-
-  await writeAudit({
-    organizationId: user.organizationId,
-    actorUserId: user.id,
-    action: AUDIT_ACTIONS.MEMBERSHIP_CREATED,
-    entityType: "Membership",
-    entityId: membershipId,
-    after: { ...data, id: membershipId, endDate: endDate.toISOString() },
-  })
-
-  revalidatePath("/dashboard/memberships")
-  revalidatePath(`/dashboard/members/${data.memberId}`)
-
-  return { success: true, data: { id: membershipId } }
 }
 
 export async function renewMembership(
@@ -160,98 +177,175 @@ export async function renewMembership(
   }
 
   const data = parsed.data
+  const timeZone = user.organization.timezone
 
   const existing = await prisma.membership.findFirst({
     where: { id: data.membershipId, organizationId: user.organizationId },
-    select: { id: true, memberId: true, status: true, endDate: true },
+    select: {
+      id: true,
+      memberId: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+    },
   })
 
   if (!existing) {
     return { success: false, error: "Membership not found" }
   }
-  if (existing.status === "CANCELLED") {
-    return { success: false, error: "Cancelled memberships cannot be renewed" }
-  }
 
   const plan = await prisma.membershipPlan.findFirst({
     where: { id: data.planId, organizationId: user.organizationId, active: true },
-    select: { id: true },
+    select: { id: true, name: true, durationDays: true },
   })
   if (!plan) {
     return { success: false, error: "Selected plan is not available for your gym" }
   }
 
-  const endDate = addDurationDays(data.startDate, data.durationDays)
+  // Derive the business state. Only EXPIRED and EXPIRING_SOON memberships can
+  // be renewed: ACTIVE ones are too far from expiry, UPCOMING ones have not
+  // started, PAUSED/CANCELLED ones are not eligible.
+  const lifecycle = getMembershipLifecycle({
+    startDate: existing.startDate,
+    endDate: existing.endDate,
+    status: existing.status,
+    timeZone,
+  })
 
-  // Includes the membership being renewed: an ACTIVE one can only be renewed
-  // from a start date after its current end (renewal normally begins the day
-  // after the current period ends).
-  const overlap = await findOverlappingActiveMembership(
-    prisma,
-    user.organizationId,
-    existing.memberId,
-    data.startDate,
-    endDate
-  )
-  if (overlap) {
+  if (!canRenewLifecycle(lifecycle.status)) {
+    if (lifecycle.status === "CANCELLED") {
+      return { success: false, error: "Cancelled memberships cannot be renewed" }
+    }
+    if (lifecycle.status === "PAUSED") {
+      return { success: false, error: "Paused memberships cannot be renewed" }
+    }
+    if (lifecycle.status === "UPCOMING") {
+      return {
+        success: false,
+        error: "This membership has not started yet. It can be renewed only once it is active.",
+      }
+    }
     return {
       success: false,
-      error: `This member already has an active membership (${overlap.plan.name}) until ${formatDate(
-        overlap.endDate
-      )}. Choose a start date after the current membership ends.`,
+      error: `This membership is active with more than ${RENEWAL_WARNING_DAYS} days left. Renew it within ${RENEWAL_WARNING_DAYS} days of the end date.`,
     }
   }
 
-  const newMembershipId = await prisma.$transaction(async (tx) => {
-    await tx.membership.update({
-      where: { id: data.membershipId },
-      data: { status: "EXPIRED" },
+  // Renewal start-date rules (see earliestRenewalStartKey):
+  //  - EXPIRED: renew from today (RENEWAL_AFTER_EXPIRY_DAYS = 0) — never from a
+  //    past date.
+  //  - EXPIRING_SOON: renew only after the current period ends (no overlap with
+  //    the membership being renewed).
+  const todayKey = dayKeyInTimeZone(new Date(), timeZone)
+  const startKey = dayKeyInTimeZone(data.startDate, timeZone)
+  const endKeyOfExisting = dayKeyInTimeZone(existing.endDate, timeZone)
+  const earliestStartKey = earliestRenewalStartKey(
+    lifecycle.status,
+    endKeyOfExisting,
+    todayKey
+  )
+
+  if (startKey < earliestStartKey) {
+    if (lifecycle.status === "EXPIRED") {
+      return {
+        success: false,
+        error: "An expired membership must renew from today or later (past dates are not allowed).",
+      }
+    }
+    return {
+      success: false,
+      error: `Renewal must begin after the current membership ends on ${formatDate(
+        existing.endDate
+      )} (back-to-back periods are allowed).`,
+    }
+  }
+
+  const endDate = addDurationDays(data.startDate, plan.durationDays)
+
+  try {
+    const newMembershipId = await prisma.$transaction(async (tx) => {
+      // Lock the membership row so two concurrent renewals cannot both create
+      // a fresh ACTIVE membership for the same member + period.
+      await tx.$queryRaw`SELECT 1 FROM "Membership" WHERE "id" = ${data.membershipId} FOR UPDATE`
+
+      const locked = await tx.membership.findFirst({
+        where: { id: data.membershipId, organizationId: user.organizationId },
+        select: { id: true, memberId: true, status: true },
+      })
+      if (!locked || locked.status === "CANCELLED") {
+        throw new BusinessRuleError("Membership not found or cancelled")
+      }
+
+      const overlap = await findOverlappingActiveMembership(
+        tx,
+        user.organizationId,
+        existing.memberId,
+        data.startDate,
+        endDate
+      )
+      if (overlap) {
+        throw new BusinessRuleError(
+          `This member already has an active membership (${overlap.plan.name}) until ${formatDate(
+            overlap.endDate
+          )}. Choose a start date after the current membership ends.`
+        )
+      }
+
+      await tx.membership.update({
+        where: { id: data.membershipId },
+        data: { status: "EXPIRED" },
+      })
+
+      const created = await tx.membership.create({
+        data: {
+          organizationId: user.organizationId,
+          memberId: existing.memberId,
+          planId: data.planId,
+          startDate: data.startDate,
+          endDate,
+          amountMinor: data.amountMinor,
+          status: "ACTIVE",
+          notes: data.notes ?? null,
+        },
+        select: { id: true },
+      })
+
+      await tx.payment.create({
+        data: {
+          organizationId: user.organizationId,
+          memberId: existing.memberId,
+          membershipId: created.id,
+          amountMinor: data.amountMinor,
+          method: data.method,
+          status: "RECORDED",
+          recordedById: user.id,
+          notes: data.notes ?? null,
+        },
+      })
+
+      return created.id
     })
 
-    const created = await tx.membership.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: existing.memberId,
-        planId: data.planId,
-        startDate: data.startDate,
-        endDate,
-        amountMinor: data.amountMinor,
-        status: "ACTIVE",
-        notes: data.notes ?? null,
-      },
-      select: { id: true },
+    await writeAudit({
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: AUDIT_ACTIONS.MEMBERSHIP_RENEWED,
+      entityType: "Membership",
+      entityId: newMembershipId,
+      before: { oldMembershipId: data.membershipId, oldStatus: existing.status },
+      after: { id: newMembershipId, endDate: endDate.toISOString() },
     })
 
-    await tx.payment.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: existing.memberId,
-        membershipId: created.id,
-        amountMinor: data.amountMinor,
-        method: data.method,
-        status: "RECORDED",
-        recordedById: user.id,
-        notes: data.notes ?? null,
-      },
-    })
+    revalidatePath("/dashboard/memberships")
+    revalidatePath(`/dashboard/members/${existing.memberId}`)
 
-    return created.id
-  })
-
-  await writeAudit({
-    organizationId: user.organizationId,
-    actorUserId: user.id,
-    action: AUDIT_ACTIONS.MEMBERSHIP_RENEWED,
-    entityType: "Membership",
-    entityId: newMembershipId,
-    before: { oldMembershipId: data.membershipId, oldStatus: existing.status },
-    after: { id: newMembershipId, endDate: endDate.toISOString() },
-  })
-
-  revalidatePath("/dashboard/memberships")
-  revalidatePath(`/dashboard/members/${existing.memberId}`)
-
-  return { success: true, data: { id: newMembershipId } }
+    return { success: true, data: { id: newMembershipId } }
+  } catch (error) {
+    if (error instanceof BusinessRuleError) {
+      return { success: false, error: error.message }
+    }
+    throw error
+  }
 }
 
 export async function cancelMembership(

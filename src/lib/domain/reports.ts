@@ -4,6 +4,8 @@ import { endOfDay, format, startOfDay, subDays } from "date-fns"
 
 import { prisma } from "@/lib/prisma"
 import { dayKeyOf } from "@/lib/format"
+import { LIFECYCLE_STATUS_ORDER } from "@/lib/memberships"
+import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -36,7 +38,8 @@ function addDays(d: Date, n: number) {
 
 export async function getReportsData(
   organizationId: string,
-  range: ReportRange
+  range: ReportRange,
+  timeZone: string
 ): Promise<ReportsData> {
   const days = range === "90" ? 90 : 30
   const now = new Date()
@@ -90,11 +93,12 @@ export async function getReportsData(
         where: revenueWhere,
         select: { amountMinor: true, membership: { select: { plan: { select: { name: true } } } } },
       }),
-      prisma.membership.groupBy({
-        by: ["status"],
-        where: { organizationId },
-        _count: { _all: true },
-      }),
+      // Membership statuses are record-level and date-derived (UPCOMING /
+      // ACTIVE / EXPIRING_SOON / EXPIRED / CANCELLED / PAUSED) so the report
+      // reflects business state, not the write-time DB enum.
+      getMembershipLifecycleStats(organizationId, timeZone).then(
+        (s) => s.records
+      ),
       prisma.appointment.groupBy({
         by: ["status"],
         where: { organizationId },
@@ -139,9 +143,9 @@ export async function getReportsData(
       .map((r) => ({ source: r.source, count: r._count._all }))
       .sort((a, b) => b.count - a.count),
     planRevenue,
-    membershipStatuses: membershipStatuses.map((r) => ({
-      status: r.status,
-      count: r._count._all,
+    membershipStatuses: LIFECYCLE_STATUS_ORDER.map((status) => ({
+      status,
+      count: membershipStatuses[status] ?? 0,
     })),
     appointmentStatuses: appointmentStatuses.map((r) => ({
       status: r.status,

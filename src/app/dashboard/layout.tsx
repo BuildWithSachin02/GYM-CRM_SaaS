@@ -31,7 +31,7 @@ export default async function DashboardLayout({
         createdAt: true,
       },
     }),
-    getSidebarCounts(user.organizationId),
+    getSidebarCounts(user.organizationId, user.organization.timezone),
   ])
 
   return (

@@ -35,7 +35,7 @@ import { RevenueTrendChart } from "@/components/charts/revenue-trend-chart"
 import { AttendanceTrendChart } from "@/components/charts/attendance-trend-chart"
 import { BreakdownChart } from "@/components/reports/breakdown-chart"
 import { formatMoney } from "@/lib/format"
-import { LEAD_SOURCE, PAYMENT_METHOD, MEMBERSHIP_STATUS, APPOINTMENT_STATUS } from "@/lib/status"
+import { LEAD_SOURCE, PAYMENT_METHOD, MEMBERSHIP_LIFECYCLE_STATUS, APPOINTMENT_STATUS } from "@/lib/status"
 import type { ReportsData } from "@/lib/domain/reports"
 
 type ReportsPageProps = {
@@ -328,7 +328,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
                     </TableHeader>
                     <TableBody>
                       {data.membershipStatuses.map((m, index) => {
-                        const config = MEMBERSHIP_STATUS[m.status as keyof typeof MEMBERSHIP_STATUS]
+                        const config = MEMBERSHIP_LIFECYCLE_STATUS[m.status as keyof typeof MEMBERSHIP_LIFECYCLE_STATUS]
                         return (
                           <TableRow key={m.status}>
                             <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
