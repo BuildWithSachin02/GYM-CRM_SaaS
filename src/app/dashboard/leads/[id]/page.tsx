@@ -57,6 +57,7 @@ export default async function LeadDetailPage({ params }: PageProps) {
       },
       leadActivities: {
         orderBy: { activityDate: "desc" },
+        take: 100,
         select: {
           id: true,
           type: true,

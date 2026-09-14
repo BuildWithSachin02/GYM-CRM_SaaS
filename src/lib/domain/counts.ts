@@ -27,14 +27,11 @@ export async function getSidebarCounts(
   const todayKey = dayKeyOf(new Date())
   const now = new Date()
 
-  // Active memberships = records whose business state is ACTIVE or within the
-  // renewal warning window (date-derived, so stale "ACTIVE" rows whose end
-  // date passed are not counted).
-  const lifecycleStats = await getMembershipLifecycleStats(organizationId, timeZone)
-  const activeMemberships =
-    lifecycleStats.records.ACTIVE + lifecycleStats.records.EXPIRING_SOON
-
+  // All 9 queries run in parallel — lifecycle stats + 8 counts have no
+  // dependencies between them. React cache() deduplicates lifecycle stats
+  // across layout + page within the same request.
   const [
+    lifecycleStats,
     members,
     plans,
     payments,
@@ -44,6 +41,7 @@ export async function getSidebarCounts(
     upcomingAppointments,
     pendingTasks,
   ] = await Promise.all([
+    getMembershipLifecycleStats(organizationId, timeZone),
     prisma.member.count({
       where: { organizationId, deletedAt: null },
     }),
@@ -80,6 +78,12 @@ export async function getSidebarCounts(
       },
     }),
   ])
+
+  // Active memberships = records whose business state is ACTIVE or within the
+  // renewal warning window (date-derived, so stale "ACTIVE" rows whose end
+  // date passed are not counted).
+  const activeMemberships =
+    lifecycleStats.records.ACTIVE + lifecycleStats.records.EXPIRING_SOON
 
   return {
     members,

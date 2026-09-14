@@ -397,6 +397,12 @@ export function LeadProfile({
             )}
           </div>
 
+          {lead.activityCount > lead.activities.length && (
+            <p className="text-xs text-muted-foreground">
+              Showing recent {lead.activities.length} of {lead.activityCount} activities
+            </p>
+          )}
+
           {lead.activities.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-sm text-muted-foreground">

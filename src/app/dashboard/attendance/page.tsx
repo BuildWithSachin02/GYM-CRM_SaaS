@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: "Attendance",
 }
 
-type SearchParams = Promise<{ date?: string }>
+type SearchParams = Promise<{ date?: string; page?: string }>
 
 export default async function AttendanceRoute({
   searchParams,
@@ -27,6 +27,9 @@ export default async function AttendanceRoute({
 
   const params = await searchParams
   const todayKey = params.date?.trim() || dayKeyOf(new Date())
+  const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1)
+  const pageSize = 100
+  const skip = (page - 1) * pageSize
 
   const [checkins, totalCount, activeQrSessions, members, locations] =
     await Promise.all([
@@ -41,6 +44,8 @@ export default async function AttendanceRoute({
           },
         },
         orderBy: { checkedInAt: "desc" },
+        skip,
+        take: pageSize,
       }),
       prisma.checkIn.count({
         where: {
@@ -89,10 +94,15 @@ export default async function AttendanceRoute({
     expiresAt: s.expiresAt.toISOString(),
   }))
 
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const currentPage = Math.min(page, totalPages)
+
   return (
     <AttendancePage
       checkins={serializedCheckins}
       totalCount={totalCount}
+      totalPages={totalPages}
+      page={currentPage}
       todayKey={todayKey}
       activeQrSessions={serializedSessions}
       members={members}

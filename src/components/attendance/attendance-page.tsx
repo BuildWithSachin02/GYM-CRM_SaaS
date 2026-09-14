@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { CalendarCheck, QrCode, UserCheck } from "lucide-react"
 
 import { formatTime } from "@/lib/format"
@@ -40,6 +41,8 @@ type Location = { id: string; name: string }
 type AttendancePageProps = {
   checkins: SerializedCheckin[]
   totalCount: number
+  totalPages: number
+  page: number
   todayKey: string
   activeQrSessions: SerializedQrSession[]
   members: Member[]
@@ -50,6 +53,8 @@ type AttendancePageProps = {
 export function AttendancePage({
   checkins,
   totalCount,
+  totalPages,
+  page,
   todayKey,
   activeQrSessions,
   members,
@@ -58,11 +63,21 @@ export function AttendancePage({
 }: AttendancePageProps) {
   const [showQrSection, setShowQrSection] = useState(false)
 
+  const pageSize = 100
+  const firstShown = totalCount === 0 ? 0 : (page - 1) * pageSize + 1
+  const lastShown = Math.min(page * pageSize, totalCount)
+  const pageHref = (target: number) =>
+    `/dashboard/attendance?date=${encodeURIComponent(todayKey)}&page=${target}`
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Attendance"
-        description={`${totalCount} check-in${totalCount === 1 ? "" : "s"} on ${todayKey}`}
+        description={
+          totalCount <= pageSize
+            ? `${totalCount} check-in${totalCount === 1 ? "" : "s"} on ${todayKey}`
+            : `Showing ${firstShown}–${lastShown} of ${totalCount} check-ins on ${todayKey}`
+        }
         actions={
           canRecord ? (
             <div className="flex gap-2">
@@ -93,7 +108,7 @@ export function AttendancePage({
           {checkins.length === 0 ? (
             <EmptyState
               icon={CalendarCheck}
-              title="No check-ins today"
+              title={page > 1 ? "No check-ins on this page" : "No check-ins today"}
               description="No members have checked in yet today."
             />
           ) : (
@@ -127,6 +142,33 @@ export function AttendancePage({
                 ))}
               </TableBody>
             </Table>
+          )}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex gap-2">
+                {page > 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<Link href={pageHref(page - 1)} />}
+                  >
+                    Previous
+                  </Button>
+                )}
+                {page < totalPages && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<Link href={pageHref(page + 1)} />}
+                  >
+                    Next
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

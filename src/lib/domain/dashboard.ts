@@ -85,46 +85,63 @@ export async function getDashboardData(
   const todayEnd = endOfDay(new Date())
   const todayKey = dayKeyOf(new Date())
 
-  // Membership counts are date-derived (unique members, not records): a member
-  // who renewed several times counts once. Record-level counts live in reports.
-  const lifecycleStats = await getMembershipLifecycleStats(organizationId, timeZone)
-
-  const [totalMembers, activeMembers, todayAttendance, todayRevenue, newLeads, pendingFollowUps] =
-    await Promise.all([
-      prisma.member.count({ where: { organizationId, deletedAt: null } }),
-      prisma.member.count({
-        where: { organizationId, deletedAt: null, status: "ACTIVE" },
-      }),
-      prisma.checkIn.count({ where: { organizationId, dayKey: todayKey } }),
-      prisma.payment.aggregate({
-        where: {
-          organizationId,
-          status: "RECORDED",
-          paymentDate: { gte: todayStart, lte: todayEnd },
-        },
-        _sum: { amountMinor: true },
-      }),
-      prisma.lead.count({ where: { organizationId, deletedAt: null, stage: "NEW" } }),
-      prisma.lead.count({
-        where: {
-          organizationId,
-          deletedAt: null,
-          stage: { in: ["NEW", "CONTACTED", "VISIT_SCHEDULED", "VISIT_DONE"] },
-          followUpDate: { lte: todayEnd },
-        },
-      }),
-    ])
-
-  const revenueTrend = await getRevenueTrend(organizationId, todayStart)
-  const attendanceTrend = await getAttendanceTrend(organizationId)
-  const expiringMemberships = await getExpiringMemberships(organizationId, todayStart)
-  const overdueTasks = await getOverdueTasks(organizationId)
-  const todayAppointments = await getTodayAppointments(organizationId)
-  const recentPayments = await getRecentPayments(organizationId)
-  const recentMembers = await getRecentMembers(organizationId)
-  const newLeadsToday = await getNewLeads(organizationId)
-  const leadPipeline = await getLeadPipeline(organizationId)
-  const nextWeekAppointments = await getNextWeekAppointments(organizationId)
+  // All 16 queries run in parallel — none depend on each other.
+  // React cache() deduplicates getMembershipLifecycleStats across layout + page.
+  const [
+    lifecycleStats,
+    totalMembers,
+    activeMembers,
+    todayAttendance,
+    todayRevenue,
+    newLeads,
+    pendingFollowUps,
+    revenueTrend,
+    attendanceTrend,
+    expiringMemberships,
+    overdueTasks,
+    todayAppointments,
+    recentPayments,
+    recentMembers,
+    newLeadsToday,
+    leadPipeline,
+    nextWeekAppointments,
+  ] = await Promise.all([
+    // Membership counts are date-derived (unique members, not records): a member
+    // who renewed several times counts once. Record-level counts live in reports.
+    getMembershipLifecycleStats(organizationId, timeZone),
+    prisma.member.count({ where: { organizationId, deletedAt: null } }),
+    prisma.member.count({
+      where: { organizationId, deletedAt: null, status: "ACTIVE" },
+    }),
+    prisma.checkIn.count({ where: { organizationId, dayKey: todayKey } }),
+    prisma.payment.aggregate({
+      where: {
+        organizationId,
+        status: "RECORDED",
+        paymentDate: { gte: todayStart, lte: todayEnd },
+      },
+      _sum: { amountMinor: true },
+    }),
+    prisma.lead.count({ where: { organizationId, deletedAt: null, stage: "NEW" } }),
+    prisma.lead.count({
+      where: {
+        organizationId,
+        deletedAt: null,
+        stage: { in: ["NEW", "CONTACTED", "VISIT_SCHEDULED", "VISIT_DONE"] },
+        followUpDate: { lte: todayEnd },
+      },
+    }),
+    getRevenueTrend(organizationId, todayStart),
+    getAttendanceTrend(organizationId),
+    getExpiringMemberships(organizationId, todayStart),
+    getOverdueTasks(organizationId),
+    getTodayAppointments(organizationId),
+    getRecentPayments(organizationId),
+    getRecentMembers(organizationId),
+    getNewLeads(organizationId),
+    getLeadPipeline(organizationId),
+    getNextWeekAppointments(organizationId),
+  ])
 
   return {
     stats: {

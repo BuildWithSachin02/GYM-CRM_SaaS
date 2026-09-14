@@ -289,6 +289,9 @@ model Member {
   @@index([organizationId, status])
   @@index([organizationId, trainerId])
   @@index([organizationId, primaryLocationId])
+  // Covers: member list (org + deletedAt + createdAt desc), totalMembers
+  // count (org + deletedAt), recentMembers (org + deletedAt + createdAt desc)
+  @@index([organizationId, deletedAt, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +344,9 @@ model Membership {
   @@index([organizationId, memberId])
   @@index([organizationId, planId])
   @@index([organizationId, endDate])
+  // Covers: expiring memberships (org + status + endDate range),
+  // sidebar membership count (org + status), lifecycle stats (org)
+  @@index([organizationId, status, endDate])
   // App-layer business rule: at most one ACTIVE/PAUSED membership may
   // overlap a given period. The D-08 unique index was removed; this index
   // backs the overlap check in the membership actions.
@@ -376,6 +382,10 @@ model Payment {
   @@index([organizationId, membershipId])
   @@index([organizationId, paymentDate])
   @@index([organizationId, method])
+  // Covers: today's revenue (org + status + paymentDate range),
+  // revenue trend 30d (org + status + paymentDate gte),
+  // recent payments (org + status + paymentDate desc)
+  @@index([organizationId, status, paymentDate])
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +411,9 @@ model CheckIn {
   @@index([organizationId])
   @@index([organizationId, memberId])
   @@index([organizationId, locationId, checkedInAt])
+  // Covers: today's attendance count (org + dayKey), attendance page list
+  // (org + dayKey ordered by checkedInAt desc), attendance trend groupBy
+  @@index([organizationId, dayKey])
 }
 
 model QRSession {
@@ -464,6 +477,11 @@ model Lead {
   @@index([organizationId, source])
   @@index([organizationId, ownerUserId])
   @@index([organizationId, followUpDate])
+  // Covers: new-lead count (org + deletedAt + stage), pending follow-ups
+  // (org + deletedAt + stage + followUpDate range), lead pipeline groupBy
+  // (org + deletedAt), today's follow-up list (org + deletedAt + stage +
+  // followUpDate range)
+  @@index([organizationId, deletedAt, stage, followUpDate])
 }
 
 model LeadActivity {
@@ -514,6 +532,10 @@ model Appointment {
   @@index([organizationId, memberId])
   @@index([organizationId, leadId])
   @@index([organizationId, trainerId])
+  // Covers: today's appointments (org + startsAt range), next-week
+  // appointments (org + status + startsAt range), upcoming appointments
+  // count (org + status + startsAt gte), appointments page (org + startsAt)
+  @@index([organizationId, status, startsAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +565,10 @@ model Task {
   @@index([organizationId, status])
   @@index([organizationId, assigneeId])
   @@index([organizationId, dueDate])
+  // Covers: overdue tasks (org + status IN + dueDate lt ordered by dueDate
+  // asc), pending-task count (org + status IN), tasks page
+  // (org + status + dueDate order)
+  @@index([organizationId, status, dueDate])
 }
 
 // ---------------------------------------------------------------------------

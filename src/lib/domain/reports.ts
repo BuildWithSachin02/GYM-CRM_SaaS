@@ -74,7 +74,7 @@ export async function getReportsData(
       }),
     ])
 
-  const [revenueTrend, attendanceTrend, paymentMethods, leadSources, planRevenueRows, membershipStatuses, appointmentStatuses] =
+  const [revenueTrend, attendanceTrend, paymentMethods, leadSources, planRevenueGroups, unattachedRevenue, membershipStatuses, appointmentStatuses] =
     await Promise.all([
       getRevenueTrend(organizationId, rangeStart, days),
       getAttendanceTrend(organizationId),
@@ -89,9 +89,16 @@ export async function getReportsData(
         where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lte: rangeEnd } },
         _count: { _all: true },
       }),
-      prisma.payment.findMany({
-        where: revenueWhere,
-        select: { amountMinor: true, membership: { select: { plan: { select: { name: true } } } } },
+      prisma.payment.groupBy({
+        by: ["membershipId"],
+        where: { ...revenueWhere, membershipId: { not: null } },
+        _sum: { amountMinor: true },
+        _count: { _all: true },
+      }),
+      prisma.payment.aggregate({
+        where: { ...revenueWhere, membershipId: null },
+        _sum: { amountMinor: true },
+        _count: { _all: true },
       }),
       // Membership statuses are record-level and date-derived (UPCOMING /
       // ACTIVE / EXPIRING_SOON / EXPIRED / CANCELLED / PAUSED) so the report
@@ -106,13 +113,32 @@ export async function getReportsData(
       }),
     ])
 
+  const membershipIds = planRevenueGroups
+    .map((g) => g.membershipId)
+    .filter((id): id is string => id !== null)
+  const planLinks = membershipIds.length
+    ? await prisma.membership.findMany({
+        where: { id: { in: membershipIds }, organizationId },
+        select: { id: true, plan: { select: { name: true } } },
+      })
+    : []
+  const planNameById = new Map(planLinks.map((m) => [m.id, m.plan.name]))
+
   const planRevenueMap = new Map<string, { amountMinor: number; count: number }>()
-  for (const p of planRevenueRows) {
-    const name = p.membership?.plan.name ?? "Unattached"
+  for (const g of planRevenueGroups) {
+    const name = g.membershipId
+      ? planNameById.get(g.membershipId) ?? "Unattached"
+      : "Unattached"
     const entry = planRevenueMap.get(name) ?? { amountMinor: 0, count: 0 }
-    entry.amountMinor += p.amountMinor
-    entry.count += 1
+    entry.amountMinor += g._sum.amountMinor ?? 0
+    entry.count += g._count._all
     planRevenueMap.set(name, entry)
+  }
+  if (unattachedRevenue._count._all > 0) {
+    const entry = planRevenueMap.get("Unattached") ?? { amountMinor: 0, count: 0 }
+    entry.amountMinor += unattachedRevenue._sum.amountMinor ?? 0
+    entry.count += unattachedRevenue._count._all
+    planRevenueMap.set("Unattached", entry)
   }
   const planRevenue = Array.from(planRevenueMap.entries())
     .map(([planName, v]) => ({ planName, ...v }))
