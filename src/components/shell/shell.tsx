@@ -6,18 +6,10 @@ import { Menu, Dumbbell } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import {
-  SidebarBrand,
-  SidebarNav,
-} from "@/components/shell/sidebar-nav"
-import {
-  NotificationsMenu,
-  UserMenu,
-  type ShellNotification,
-} from "@/components/shell/topbar"
+import { SidebarBrand } from "@/components/shell/sidebar-nav"
+import { UserMenu } from "@/components/shell/topbar"
 import { ThemeToggle } from "@/components/shell/theme-toggle"
 import type { SessionUser } from "@/lib/auth/auth"
-import type { SidebarCounts } from "@/lib/domain/counts"
 
 const TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -46,20 +38,19 @@ function titleForPath(pathname: string): string {
 
 type ShellProps = {
   user: SessionUser
-  notifications: ShellNotification[]
-  sidebarCounts: SidebarCounts
+  sidebarNav: React.ReactNode
+  topbarActions: React.ReactNode
   children: React.ReactNode
 }
 
-export function Shell({ user, notifications, sidebarCounts, children }: ShellProps) {
+export function Shell({ user, sidebarNav, topbarActions, children }: ShellProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const unreadCount = notifications.filter((n) => !n.isRead).length
 
   const sidebar = (
     <>
       <SidebarBrand />
-      <SidebarNav user={user} counts={sidebarCounts} />
+      {sidebarNav}
     </>
   )
 
@@ -68,7 +59,7 @@ export function Shell({ user, notifications, sidebarCounts, children }: ShellPro
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 border-r bg-muted/30 lg:flex lg:flex-col print:hidden">
         <SidebarBrand />
-        <SidebarNav user={user} counts={sidebarCounts} />
+        {sidebarNav}
       </aside>
 
       {/* Mobile sidebar */}
@@ -109,10 +100,7 @@ export function Shell({ user, notifications, sidebarCounts, children }: ShellPro
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            <NotificationsMenu
-              notifications={notifications}
-              unreadCount={unreadCount}
-            />
+            {topbarActions}
             <ThemeToggle />
             <UserMenu user={user} />
           </div>

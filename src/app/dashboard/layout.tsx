@@ -1,8 +1,13 @@
+import { Suspense } from "react"
 import type { Metadata } from "next"
 
-import { prisma } from "@/lib/prisma"
 import { requireUser } from "@/lib/auth/auth"
-import { getSidebarCounts } from "@/lib/domain/counts"
+import {
+  NotificationsBellFallback,
+  NotificationsWithCounts,
+  SidebarNavWithCounts,
+} from "@/components/shell/dashboard-shell-sections"
+import { SidebarNav } from "@/components/shell/sidebar-nav"
 import { Shell } from "@/components/shell/shell"
 
 export const metadata: Metadata = {
@@ -14,34 +19,24 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Authentication/authorization stays on the critical path so every
+  // dashboard route remains protected. Notifications and sidebar counts are
+  // streamed in below so the shell can paint immediately after auth.
   const user = await requireUser()
-
-  const [notifications, sidebarCounts] = await Promise.all([
-    prisma.notification.findMany({
-      where: { organizationId: user.organizationId, userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 25,
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        body: true,
-        link: true,
-        isRead: true,
-        createdAt: true,
-      },
-    }),
-    getSidebarCounts(user.organizationId, user.organization.timezone),
-  ])
 
   return (
     <Shell
       user={user}
-      notifications={notifications.map((n) => ({
-        ...n,
-        createdAt: n.createdAt.toISOString(),
-      }))}
-      sidebarCounts={sidebarCounts}
+      sidebarNav={
+        <Suspense fallback={<SidebarNav user={user} />}>
+          <SidebarNavWithCounts user={user} />
+        </Suspense>
+      }
+      topbarActions={
+        <Suspense fallback={<NotificationsBellFallback />}>
+          <NotificationsWithCounts user={user} />
+        </Suspense>
+      }
     >
       {children}
     </Shell>

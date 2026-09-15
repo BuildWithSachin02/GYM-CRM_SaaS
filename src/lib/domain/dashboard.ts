@@ -6,6 +6,7 @@ import {
   startOfDay,
   subDays,
 } from "date-fns"
+import { cache } from "react"
 
 import { prisma } from "@/lib/prisma"
 import { dayKeyOf } from "@/lib/format"
@@ -81,12 +82,46 @@ export async function getDashboardData(
   organizationId: string,
   timeZone: string
 ): Promise<DashboardData> {
+  const [statsData, trends, activity, remaining] = await Promise.all([
+    getDashboardStatsData(organizationId, timeZone),
+    getDashboardTrendsData(organizationId),
+    getDashboardActivityData(organizationId),
+    getDashboardRemainingData(organizationId),
+  ])
+
+  return {
+    stats: statsData.stats,
+    revenueTrend: trends.revenueTrend,
+    attendanceTrend: trends.attendanceTrend,
+    recentPayments: activity.recentPayments,
+    recentMembers: activity.recentMembers,
+    newLeadsToday: activity.newLeadsToday,
+    leadPipeline: activity.leadPipeline,
+    expiringMemberships: remaining.expiringMemberships,
+    todayAppointments: remaining.todayAppointments,
+    overdueTasks: remaining.overdueTasks,
+    nextWeekAppointments: remaining.nextWeekAppointments,
+  }
+}
+
+export type DashboardStatsData = {
+  stats: DashboardData["stats"]
+  upcomingCount: number
+}
+
+/**
+ * Segment loader for the dashboard stats row (8 stat cards).
+ * Shares the request-scoped membership lifecycle scan and the
+ * next-week appointments query with other segments via React cache().
+ */
+export async function getDashboardStatsData(
+  organizationId: string,
+  timeZone: string
+): Promise<DashboardStatsData> {
   const todayStart = startOfDay(new Date())
   const todayEnd = endOfDay(new Date())
   const todayKey = dayKeyOf(new Date())
 
-  // All 16 queries run in parallel — none depend on each other.
-  // React cache() deduplicates getMembershipLifecycleStats across layout + page.
   const [
     lifecycleStats,
     totalMembers,
@@ -95,19 +130,8 @@ export async function getDashboardData(
     todayRevenue,
     newLeads,
     pendingFollowUps,
-    revenueTrend,
-    attendanceTrend,
-    expiringMemberships,
-    overdueTasks,
-    todayAppointments,
-    recentPayments,
-    recentMembers,
-    newLeadsToday,
-    leadPipeline,
     nextWeekAppointments,
   ] = await Promise.all([
-    // Membership counts are date-derived (unique members, not records): a member
-    // who renewed several times counts once. Record-level counts live in reports.
     getMembershipLifecycleStats(organizationId, timeZone),
     prisma.member.count({ where: { organizationId, deletedAt: null } }),
     prisma.member.count({
@@ -131,16 +155,7 @@ export async function getDashboardData(
         followUpDate: { lte: todayEnd },
       },
     }),
-    getRevenueTrend(organizationId, todayStart),
-    getAttendanceTrend(organizationId),
-    getExpiringMemberships(organizationId, todayStart),
-    getOverdueTasks(organizationId),
-    getTodayAppointments(organizationId),
-    getRecentPayments(organizationId),
-    getRecentMembers(organizationId),
-    getNewLeads(organizationId),
-    getLeadPipeline(organizationId),
-    getNextWeekAppointments(organizationId),
+    getDashboardUpcomingAppointments(organizationId),
   ])
 
   return {
@@ -154,17 +169,61 @@ export async function getDashboardData(
       newLeads,
       pendingFollowUps,
     },
-    revenueTrend,
-    attendanceTrend,
-    expiringMemberships,
-    overdueTasks,
-    todayAppointments,
-    recentPayments,
-    recentMembers,
-    newLeadsToday,
-    leadPipeline,
-    nextWeekAppointments,
+    upcomingCount: nextWeekAppointments.length,
   }
+}
+
+/**
+ * Segment loader for the trend charts (revenue + attendance).
+ */
+export async function getDashboardTrendsData(
+  organizationId: string
+): Promise<Pick<DashboardData, "revenueTrend" | "attendanceTrend">> {
+  const [revenueTrend, attendanceTrend] = await Promise.all([
+    getRevenueTrend(organizationId, startOfDay(new Date())),
+    getAttendanceTrend(organizationId),
+  ])
+  return { revenueTrend, attendanceTrend }
+}
+
+/**
+ * Segment loader for recent activity widgets (payments, members, leads).
+ */
+export async function getDashboardActivityData(
+  organizationId: string
+): Promise<
+  Pick<DashboardData, "recentPayments" | "recentMembers" | "newLeadsToday" | "leadPipeline">
+> {
+  const [recentPayments, recentMembers, newLeadsToday, leadPipeline] =
+    await Promise.all([
+      getRecentPayments(organizationId),
+      getRecentMembers(organizationId),
+      getNewLeads(organizationId),
+      getLeadPipeline(organizationId),
+    ])
+  return { recentPayments, recentMembers, newLeadsToday, leadPipeline }
+}
+
+/**
+ * Segment loader for the remaining dashboard widgets
+ * (expiring, today's appointments, overdue tasks, upcoming appointments).
+ */
+export async function getDashboardRemainingData(
+  organizationId: string
+): Promise<
+  Pick<
+    DashboardData,
+    "expiringMemberships" | "todayAppointments" | "overdueTasks" | "nextWeekAppointments"
+  >
+> {
+  const [expiringMemberships, todayAppointments, overdueTasks, nextWeekAppointments] =
+    await Promise.all([
+      getExpiringMemberships(organizationId, startOfDay(new Date())),
+      getTodayAppointments(organizationId),
+      getOverdueTasks(organizationId),
+      getDashboardUpcomingAppointments(organizationId),
+    ])
+  return { expiringMemberships, todayAppointments, overdueTasks, nextWeekAppointments }
 }
 
 function addDays(d: Date, n: number) {
@@ -378,6 +437,14 @@ async function getLeadPipeline(organizationId: string) {
   })
   return rows.map((r) => ({ stage: r.stage, count: r._count._all }))
 }
+
+/**
+ * Deduplicates the next-week appointments query across the dashboard's
+ * Suspense segments within the same request (stats card + upcoming widget).
+ */
+export const getDashboardUpcomingAppointments = cache((organizationId: string) =>
+  getNextWeekAppointments(organizationId)
+)
 
 async function getNextWeekAppointments(organizationId: string) {
   const todayStart = startOfDay(new Date())
