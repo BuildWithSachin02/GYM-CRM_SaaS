@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache"
 
+import { Prisma } from "@prisma/client"
+
 import { prisma } from "@/lib/prisma"
-import { requireUserOrThrow } from "@/lib/auth/auth"
+import { requireUserOrThrow, type SessionUser } from "@/lib/auth/auth"
 import { memberSchema, type MemberInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 
@@ -12,7 +14,15 @@ export type MemberActionResult =
   | { success: false; error: string; fieldErrors?: Record<string, string[]> }
 
 export async function createMember(input: MemberInput): Promise<MemberActionResult> {
-  const user = await requireUserOrThrow()
+  let user: SessionUser
+  try {
+    user = await requireUserOrThrow()
+  } catch {
+    return {
+      success: false,
+      error: "Your session has expired. Please sign in again.",
+    }
+  }
 
   const parsed = memberSchema.safeParse(input)
   if (!parsed.success) {
@@ -27,25 +37,49 @@ export async function createMember(input: MemberInput): Promise<MemberActionResu
 
   const data = parsed.data
 
-  const member = await prisma.member.create({
-    data: {
-      organizationId: user.organizationId,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      phone: data.phone,
-      email: data.email || null,
-      gender: (data.gender as "MALE" | "FEMALE" | "OTHER") ?? null,
-      dateOfBirth: data.dateOfBirth ?? null,
-      address: data.address ?? null,
-      emergencyContactName: data.emergencyContactName ?? null,
-      emergencyContactPhone: data.emergencyContactPhone ?? null,
-      trainerId: data.trainerId ?? null,
-      signupSource: (data.signupSource as "WEBSITE" | "INSTAGRAM" | "FACEBOOK" | "WHATSAPP" | "GOOGLE" | "WALK_IN" | "MANUAL") ?? null,
-      notes: data.notes ?? null,
-      status: "ACTIVE",
-    },
-    select: { id: true },
-  })
+  let member: { id: string }
+  try {
+    member = await prisma.member.create({
+      data: {
+        organizationId: user.organizationId,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        phone: data.phone,
+        email: data.email || null,
+        gender: (data.gender as "MALE" | "FEMALE" | "OTHER") ?? null,
+        dateOfBirth: data.dateOfBirth ?? null,
+        address: data.address ?? null,
+        emergencyContactName: data.emergencyContactName ?? null,
+        emergencyContactPhone: data.emergencyContactPhone ?? null,
+        trainerId: data.trainerId ?? null,
+        signupSource: (data.signupSource as "WEBSITE" | "INSTAGRAM" | "FACEBOOK" | "WHATSAPP" | "GOOGLE" | "WALK_IN" | "MANUAL") ?? null,
+        notes: data.notes ?? null,
+        status: "ACTIVE",
+      },
+      select: { id: true },
+    })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target : []
+      const fieldErrors: Record<string, string[]> = {}
+      if (target.includes("phone")) {
+        fieldErrors.phone = ["A member with this phone number already exists."]
+      }
+      if (target.includes("email")) {
+        fieldErrors.email = ["A member with this email already exists."]
+      }
+      return {
+        success: false,
+        error: "A member with these details already exists.",
+        fieldErrors: Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined,
+      }
+    }
+    console.error("createMember failed", error)
+    return {
+      success: false,
+      error: "Could not create the member. Please try again.",
+    }
+  }
 
   await writeAudit({
     organizationId: user.organizationId,
