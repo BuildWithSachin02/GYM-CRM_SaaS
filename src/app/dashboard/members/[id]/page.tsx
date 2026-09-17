@@ -4,7 +4,12 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
-import { getMembershipLifecycle } from "@/lib/memberships"
+import {
+  dayKeyInTimeZone,
+  getMemberCoverage,
+  getMembershipLifecycle,
+  pickPrimaryMembership,
+} from "@/lib/memberships"
 
 import { MemberProfile } from "@/components/members/member-profile"
 
@@ -50,9 +55,9 @@ export default async function MemberDetailPage({ params }: PageProps) {
       updatedAt: true,
       memberships: {
         orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
-        take: 3,
         select: {
           id: true,
+          memberId: true,
           startDate: true,
           endDate: true,
           status: true,
@@ -92,6 +97,17 @@ export default async function MemberDetailPage({ params }: PageProps) {
     notFound()
   }
 
+  const timeZone = user.organization.timezone
+  const today = new Date()
+  const todayKey = dayKeyInTimeZone(today, timeZone)
+
+  // Member-level coverage: the summary badge/labels come from the union of
+  // every valid period (the same rule as the memberships list), so a record
+  // that ended but is chained to future coverage never reads "expiring".
+  const coverage = getMemberCoverage(member.memberships, timeZone, todayKey)
+  const primary = pickPrimaryMembership(member.memberships, timeZone, today)
+  const coverageThroughKey = coverage.overallEndKey
+
   const serialized = {
     ...member,
     createdAt: member.createdAt.toISOString(),
@@ -102,7 +118,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
         startDate: m.startDate,
         endDate: m.endDate,
         status: m.status,
-        timeZone: user.organization.timezone,
+        timeZone,
       })
       return {
         ...m,
@@ -111,6 +127,13 @@ export default async function MemberDetailPage({ params }: PageProps) {
         status: lifecycle.status,
         daysLeft: lifecycle.daysLeft,
         daysUntilStart: lifecycle.daysUntilStart,
+        isPrimary: primary?.row.id === m.id,
+        renewedThrough:
+          coverageThroughKey != null &&
+          coverageThroughKey > dayKeyInTimeZone(m.endDate, timeZone),
+        coverageThroughKey,
+        memberStatus: primary?.lifecycle.status ?? lifecycle.status,
+        memberDaysLeft: primary?.lifecycle.daysLeft ?? lifecycle.daysLeft,
       }
     }),
     payments: member.payments.map((p) => ({

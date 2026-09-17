@@ -64,7 +64,10 @@ export default async function DashboardPage() {
       </Suspense>
 
       <Suspense fallback={<HomeCardsSkeleton />}>
-        <HomeRemainingSection organizationId={user.organizationId} />
+        <HomeRemainingSection
+          organizationId={user.organizationId}
+          timeZone={user.organization.timezone}
+        />
       </Suspense>
 
       <Suspense fallback={<HomeActivitySkeleton />}>

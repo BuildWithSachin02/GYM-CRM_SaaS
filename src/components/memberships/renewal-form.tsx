@@ -8,8 +8,7 @@ import { z } from "zod"
 import { toast } from "sonner"
 
 import { renewMembership } from "@/lib/actions/memberships"
-import { formatDate, formatMoney } from "@/lib/format"
-import { earliestRenewalStartKey } from "@/lib/memberships"
+import { formatDate, formatDayKey, formatMoney } from "@/lib/format"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -67,13 +66,33 @@ type RenewalFormProps = {
     /** Date-derived lifecycle of the membership being renewed. */
     status: "EXPIRED" | "EXPIRING_SOON"
   }
-  /** Business date (YYYY-MM-DD) in the org's timezone, from the server. */
-  todayKey: string
+  /**
+   * Server-computed default start date (YYYY-MM-DD) in the org's timezone.
+   * It is the earliest start the server will accept, considering the renewed
+   * period and every other membership the member holds, so submitting the
+   * default never trips the overlap business rule.
+   */
+  suggestedStart: string
+  /**
+   * Farthest valid coverage end (YYYY-MM-DD) across the member's records.
+   * When `renewedThrough` is set the modal explains that coverage continues
+   * past the record being renewed, and that the renewal starts after it.
+   */
+  coverageThroughKey?: string | null
+  /** True when another of the member's records covers past this one's end. */
+  renewedThrough?: boolean
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   trigger?: React.ReactNode
 }
 
-export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFormProps) {
+export function RenewalForm({
+  membership,
+  suggestedStart,
+  coverageThroughKey,
+  renewedThrough,
+  plans,
+  trigger,
+}: RenewalFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -82,19 +101,6 @@ export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFor
   const currentPlan = useMemo(
     () => plans.find((p) => p.id === membership.planId) ?? null,
     [plans, membership.planId]
-  )
-
-  // Expired memberships renew from today (no 7-day grace). Memberships still
-  // in the warning window renew after the current period ends (no overlap),
-  // which is the day after the end date.
-  const suggestedStart = useMemo(
-    () =>
-      earliestRenewalStartKey(
-        membership.status,
-        membership.endDate.slice(0, 10),
-        todayKey
-      ),
-    [membership.status, membership.endDate, todayKey]
   )
 
   const form = useForm<RenewalFormValues>({
@@ -128,6 +134,15 @@ export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFor
     setServerError(null)
     if (!selectedPlan) {
       setServerError("Select a valid plan")
+      return
+    }
+    // Client-side mirror of the server gate: the start can never be earlier
+    // than the coverage-based suggestion, so the modal never opens in error.
+    if (data.startDate < suggestedStart) {
+      form.setError("startDate", {
+        type: "manual",
+        message: `Start date cannot be before ${formatDayKey(suggestedStart)}`,
+      })
       return
     }
     startTransition(async () => {
@@ -186,16 +201,24 @@ export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFor
             <FormServerError>{serverError}</FormServerError>
 
             <p className="text-sm text-muted-foreground">
-              {membership.status === "EXPIRED" ? (
+              {renewedThrough && coverageThroughKey ? (
                 <>
-                  Current membership ended {formatDate(membership.endDate)}. Renewal
-                  begins {suggestedStart} (today) unless you change the start date.
+                  Your existing membership coverage runs until{" "}
+                  {formatDayKey(coverageThroughKey)}. This renewal will start from{" "}
+                  {formatDayKey(suggestedStart)} (the day after that coverage
+                  ends) unless you change the start date.
+                </>
+              ) : membership.status === "EXPIRED" ? (
+                <>
+                  Current membership ended {formatDate(membership.endDate)}. Earliest
+                  renewal date is {formatDayKey(suggestedStart)} unless you change
+                  the start date.
                 </>
               ) : (
                 <>
-                  Current membership ends {formatDate(membership.endDate)}. Renewal
-                  begins {suggestedStart} (back-to-back, no overlap) unless you change
-                  the start date.
+                  Current membership ends {formatDate(membership.endDate)}. Earliest
+                  renewal date is {formatDayKey(suggestedStart)} (back-to-back, no
+                  overlap) unless you change the start date.
                 </>
               )}
             </p>
@@ -232,7 +255,11 @@ export function RenewalForm({ membership, todayKey, plans, trigger }: RenewalFor
                   <FormItem>
                     <FormLabel>Start Date *</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} />
+                      <Input
+                        type="date"
+                        min={suggestedStart}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

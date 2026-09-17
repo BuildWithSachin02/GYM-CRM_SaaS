@@ -5,9 +5,12 @@ import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
 import {
+  canRenewLifecycle,
   dayKeyInTimeZone,
+  getMemberCoverage,
   getMembershipLifecycle,
   LIFECYCLE_STATUS_ORDER,
+  nextValidRenewalStartKey,
   type MembershipLifecycleStatus,
 } from "@/lib/memberships"
 import { getMembershipLifecycleStats, pickPrimaryMembership } from "@/lib/domain/memberships"
@@ -38,14 +41,22 @@ function serializeHistoryRows(
     status: string
     plan: { id: string; name: string }
   }>,
-  timeZone: string
+  timeZone: string,
+  todayKey: string
 ) {
+  // Renewal rules are per-member, not per-record: every record in this member's
+  // history shares the same suggested start (the day after ALL their coverage)
+  // and the same coverage-through information.
+  const suggestedStart = nextValidRenewalStartKey(rows, timeZone, todayKey)
+  const coverageThroughKey = getMemberCoverage(rows, timeZone, todayKey).overallEndKey
+  const today = new Date()
   return rows.map((m) => {
     const lifecycle = getMembershipLifecycle({
       startDate: m.startDate,
       endDate: m.endDate,
       status: m.status,
       timeZone,
+      today,
     })
     return {
       id: m.id,
@@ -55,6 +66,11 @@ function serializeHistoryRows(
       endDate: m.endDate.toISOString(),
       status: lifecycle.status,
       daysLeft: lifecycle.daysLeft,
+      suggestedStart,
+      coverageThroughKey,
+      renewedThrough:
+        coverageThroughKey != null &&
+        coverageThroughKey > dayKeyInTimeZone(m.endDate, timeZone),
     }
   })
 }
@@ -104,10 +120,9 @@ export default async function MembershipsPage({
       <MembershipHistory
         memberId={target.id}
         memberName={`${target.firstName} ${target.lastName}`.trim()}
-        memberships={serializeHistoryRows(rows, timeZone)}
+        memberships={serializeHistoryRows(rows, timeZone, todayKey)}
         plans={plans}
         canManage={canManage}
-        todayKey={todayKey}
       />
     )
   }
@@ -134,6 +149,7 @@ export default async function MembershipsPage({
   const stats = await getMembershipLifecycleStats(user.organizationId, timeZone)
 
   const entries = []
+  const today = new Date()
   for (const [memberId, rows] of rowsByMember) {
     const primary = pickPrimaryMembership(rows, timeZone)
     if (!primary || primary.row.memberId !== memberId) continue
@@ -146,6 +162,24 @@ export default async function MembershipsPage({
       if (primary.lifecycle.status !== statusFilter) continue
     }
 
+    // The member's coverage extends through the farthest valid end date; a
+    // renewal may only start after all of it (never inside a 1+ day gap, but
+    // the day after the last coverage end even if that end already passed).
+    const coverageThroughKey = primary.coverage.overallEndKey
+    const suggestedStart = nextValidRenewalStartKey(rows, timeZone, todayKey)
+    const canRenew = rows.some(
+      (row) =>
+        canRenewLifecycle(
+          getMembershipLifecycle({
+            startDate: row.startDate,
+            endDate: row.endDate,
+            status: row.status,
+            timeZone,
+            today,
+          }).status
+        )
+    )
+
     entries.push({
       id: primary.row.id,
       memberId,
@@ -157,6 +191,12 @@ export default async function MembershipsPage({
       status: primary.lifecycle.status,
       daysLeft: primary.lifecycle.daysLeft,
       historyCount: rows.length,
+      suggestedStart,
+      coverageThroughKey,
+      renewedThrough:
+        coverageThroughKey != null &&
+        coverageThroughKey > dayKeyInTimeZone(primary.row.endDate, timeZone),
+      canRenew,
     })
   }
 

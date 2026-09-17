@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Users, Plus, SearchIcon, Clock, XCircle, History } from "lucide-react"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
-import { formatDate } from "@/lib/format"
+import { formatDate, formatDayKey } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS } from "@/lib/status"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -45,6 +45,14 @@ type SerializedMembership = {
   daysLeft: number | null
   /** Total membership records for this member (1 = no history). */
   historyCount: number
+  /** Server-computed earliest valid renewal start (YYYY-MM-DD). */
+  suggestedStart: string
+  /** Farthest valid coverage end (YYYY-MM-DD) across the member's records. */
+  coverageThroughKey: string | null
+  /** True when this display period is covered further by another record. */
+  renewedThrough: boolean
+  /** Whether the member has any record eligible to renew (server decision). */
+  canRenew: boolean
 }
 
 type MembershipListProps = {
@@ -149,6 +157,7 @@ export function MembershipList({
             <MembershipForm
               members={members}
               plans={plans}
+              todayKey={todayKey}
               trigger={
                 <Button>
                   <Plus className="size-4" /> New Membership
@@ -233,9 +242,7 @@ export function MembershipList({
               </TableHeader>
               <TableBody>
                 {memberships.map((m, index) => {
-                  const canRenew =
-                    canManage &&
-                    (m.status === "EXPIRED" || m.status === "EXPIRING_SOON")
+                  const canRenew = canManage && m.canRenew
                   const rowNumber = (currentPage - 1) * 25 + index + 1
 
                   return (
@@ -264,6 +271,11 @@ export function MembershipList({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {formatDate(m.endDate)}
+                        {m.renewedThrough && m.coverageThroughKey && (
+                          <span className="block text-xs text-muted-foreground">
+                            covered through {formatDayKey(m.coverageThroughKey)}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <StatusBadge
@@ -297,7 +309,9 @@ export function MembershipList({
                                 endDate: m.endDate,
                                 status: m.status === "EXPIRING_SOON" ? "EXPIRING_SOON" : "EXPIRED",
                               }}
-                              todayKey={todayKey}
+                              suggestedStart={m.suggestedStart}
+                              coverageThroughKey={m.coverageThroughKey}
+                              renewedThrough={m.renewedThrough}
                               plans={plans}
                               trigger={
                                 <Button variant="outline" size="sm">

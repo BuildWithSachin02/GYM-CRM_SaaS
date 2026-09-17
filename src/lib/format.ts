@@ -31,6 +31,18 @@ export function formatTime(d: Date | string | null | undefined): string {
   return format(new Date(d), "h:mm a")
 }
 
+/**
+ * Format a YYYY-MM-DD day key for display. Parses the components into a local
+ * Date (avoids the `new Date("YYYY-MM-DD")` UTC shift) so the label reads the
+ * same calendar day the key represents in the org's timezone.
+ */
+export function formatDayKey(key: string | null | undefined): string {
+  if (!key) return "—"
+  const [y, m, d] = key.split("-").map(Number)
+  if (!y || !m || !d) return key
+  return format(new Date(y, m - 1, d), "dd MMM yyyy")
+}
+
 export function dayKeyOf(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`

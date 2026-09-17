@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow } from "@/lib/auth/auth"
 import { can } from "@/lib/permissions"
 import { BusinessRuleError } from "@/lib/errors"
-import { formatDate } from "@/lib/format"
+import { formatDayKey } from "@/lib/format"
 import {
   membershipCreateSchema,
   membershipRenewSchema,
@@ -15,12 +15,13 @@ import {
 } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import {
-  addDurationDays,
   canRenewLifecycle,
   dayKeyInTimeZone,
-  earliestRenewalStartKey,
   findOverlappingActiveMembership,
+  getMemberCoverage,
   getMembershipLifecycle,
+  membershipPeriodFromStart,
+  nextValidRenewalStartKey,
   RENEWAL_WARNING_DAYS,
 } from "@/lib/memberships"
 
@@ -73,7 +74,13 @@ export async function createMembership(
   if (!member) return { success: false, error: "Member not found" }
   if (!plan) return { success: false, error: "Selected plan is not available for your gym" }
 
-  const endDate = addDurationDays(data.startDate, plan.durationDays)
+  // Period derived from the org-timezone calendar day so the stored instants
+  // are local midnights and never drift across DST/timezone boundaries.
+  const { start, end } = membershipPeriodFromStart(
+    data.startDate,
+    plan.durationDays,
+    user.organization.timezone
+  )
 
   try {
     const membershipId = await prisma.$transaction(async (tx) => {
@@ -86,14 +93,17 @@ export async function createMembership(
         tx,
         user.organizationId,
         data.memberId,
-        data.startDate,
-        endDate
+        start,
+        end,
+        user.organization.timezone
       )
       if (overlap) {
         throw new BusinessRuleError(
-          `This member already has an active membership (${overlap.plan.name}, ${formatDate(
-            overlap.startDate
-          )} – ${formatDate(overlap.endDate)}) that overlaps this period. Use "Renew" on that membership, or choose a non-overlapping start date.`
+          `This member already has a membership (${overlap.plan.name}, ${formatDayKey(
+            dayKeyInTimeZone(overlap.startDate, user.organization.timezone)
+          )} – ${formatDayKey(
+            dayKeyInTimeZone(overlap.endDate, user.organization.timezone)
+          )}) that overlaps this period. Use "Renew" on that membership, or choose a non-overlapping start date.`
         )
       }
 
@@ -103,7 +113,7 @@ export async function createMembership(
           organizationId: user.organizationId,
           memberId: data.memberId,
           status: "ACTIVE",
-          endDate: { lt: data.startDate },
+          endDate: { lt: start },
         },
         data: { status: "EXPIRED" },
       })
@@ -113,8 +123,8 @@ export async function createMembership(
           organizationId: user.organizationId,
           memberId: data.memberId,
           planId: data.planId,
-          startDate: data.startDate,
-          endDate,
+          startDate: start,
+          endDate: end,
           amountMinor: data.amountMinor,
           status: "ACTIVE",
           notes: data.notes ?? null,
@@ -144,7 +154,7 @@ export async function createMembership(
       action: AUDIT_ACTIONS.MEMBERSHIP_CREATED,
       entityType: "Membership",
       entityId: membershipId,
-      after: { ...data, id: membershipId, endDate: endDate.toISOString() },
+      after: { ...data, id: membershipId, endDate: end.toISOString() },
     })
 
     revalidatePath("/dashboard/memberships")
@@ -202,6 +212,16 @@ export async function renewMembership(
     return { success: false, error: "Selected plan is not available for your gym" }
   }
 
+  // Load the member's whole membership history: eligibility and the allowable
+  // start date depend on their total coverage, not just the record renewed.
+  const allRows = await prisma.membership.findMany({
+    where: {
+      organizationId: user.organizationId,
+      memberId: existing.memberId,
+    },
+    select: { id: true, status: true, startDate: true, endDate: true },
+  })
+
   // Derive the business state. Only EXPIRED and EXPIRING_SOON memberships can
   // be renewed: ACTIVE ones are too far from expiry, UPCOMING ones have not
   // started, PAUSED/CANCELLED ones are not eligible.
@@ -231,36 +251,45 @@ export async function renewMembership(
     }
   }
 
-  // Renewal start-date rules (see earliestRenewalStartKey):
-  //  - EXPIRED: renew from today (RENEWAL_AFTER_EXPIRY_DAYS = 0) — never from a
-  //    past date.
-  //  - EXPIRING_SOON: renew only after the current period ends (no overlap with
-  //    the membership being renewed).
+  // Renewal start-date rules, driven by the member's TOTAL coverage:
+  //  - never from a past date.
+  //  - never inside (or earlier than) the member's existing coverage — the
+  //    start must be >= nextValidRenewalStartKey, the day after all their
+  //    non-cancelled records end. This applies to every member identically:
+  //    a member whose records chain back-to-back can only renew from the day
+  //    after their farthest valid coverage ends.
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
   const startKey = dayKeyInTimeZone(data.startDate, timeZone)
-  const endKeyOfExisting = dayKeyInTimeZone(existing.endDate, timeZone)
-  const earliestStartKey = earliestRenewalStartKey(
-    lifecycle.status,
-    endKeyOfExisting,
-    todayKey
-  )
+  const coverage = getMemberCoverage(allRows, timeZone, todayKey)
+  const suggestedStart = nextValidRenewalStartKey(allRows, timeZone, todayKey)
+  const coverageThroughKey = coverage.overallEndKey
 
-  if (startKey < earliestStartKey) {
-    if (lifecycle.status === "EXPIRED") {
-      return {
-        success: false,
-        error: "An expired membership must renew from today or later (past dates are not allowed).",
-      }
-    }
+  if (startKey < todayKey) {
     return {
       success: false,
-      error: `Renewal must begin after the current membership ends on ${formatDate(
-        existing.endDate
-      )} (back-to-back periods are allowed).`,
+      error: `Renewal must start today (${formatDayKey(todayKey)}) or later — past start dates are not allowed.`,
     }
   }
 
-  const endDate = addDurationDays(data.startDate, plan.durationDays)
+  if (startKey < suggestedStart) {
+    return {
+      success: false,
+      error: `Cannot start a renewal on ${formatDayKey(
+        startKey
+      )} because this member already has membership coverage${
+        coverageThroughKey
+          ? ` until ${formatDayKey(coverageThroughKey)}`
+          : ""
+      }. Choose ${formatDayKey(suggestedStart)} or later.`,
+    }
+  }
+
+  // Period derived from the org-timezone calendar day (local midnights).
+  const { start, end } = membershipPeriodFromStart(
+    data.startDate,
+    plan.durationDays,
+    timeZone
+  )
 
   try {
     const newMembershipId = await prisma.$transaction(async (tx) => {
@@ -280,13 +309,15 @@ export async function renewMembership(
         tx,
         user.organizationId,
         existing.memberId,
-        data.startDate,
-        endDate
+        start,
+        end,
+        timeZone,
+        data.membershipId
       )
       if (overlap) {
         throw new BusinessRuleError(
-          `This member already has an active membership (${overlap.plan.name}) until ${formatDate(
-            overlap.endDate
+          `This member already has a membership (${overlap.plan.name}) until ${formatDayKey(
+            dayKeyInTimeZone(overlap.endDate, timeZone)
           )}. Choose a start date after the current membership ends.`
         )
       }
@@ -301,8 +332,8 @@ export async function renewMembership(
           organizationId: user.organizationId,
           memberId: existing.memberId,
           planId: data.planId,
-          startDate: data.startDate,
-          endDate,
+          startDate: start,
+          endDate: end,
           amountMinor: data.amountMinor,
           status: "ACTIVE",
           notes: data.notes ?? null,
@@ -333,7 +364,7 @@ export async function renewMembership(
       entityType: "Membership",
       entityId: newMembershipId,
       before: { oldMembershipId: data.membershipId, oldStatus: existing.status },
-      after: { id: newMembershipId, endDate: endDate.toISOString() },
+      after: { id: newMembershipId, endDate: end.toISOString() },
     })
 
     revalidatePath("/dashboard/memberships")

@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ArrowLeft, ScrollText } from "lucide-react"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
-import { formatDate } from "@/lib/format"
+import { formatDate, formatDayKey } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS } from "@/lib/status"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -29,6 +29,12 @@ type SerializedMembership = {
   endDate: string
   status: MembershipLifecycleStatus
   daysLeft: number | null
+  /** Server-computed earliest valid renewal start (YYYY-MM-DD). */
+  suggestedStart: string
+  /** Farthest valid coverage end (YYYY-MM-DD) across this member's records. */
+  coverageThroughKey: string | null
+  /** True when this record's period is covered further by another record. */
+  renewedThrough: boolean
 }
 
 type MembershipHistoryProps = {
@@ -37,8 +43,6 @@ type MembershipHistoryProps = {
   memberships: SerializedMembership[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   canManage: boolean
-  /** Business date (YYYY-MM-DD) in the org's timezone. */
-  todayKey: string
 }
 
 export function MembershipHistory({
@@ -47,7 +51,6 @@ export function MembershipHistory({
   memberships,
   plans,
   canManage,
-  todayKey,
 }: MembershipHistoryProps) {
   return (
     <div className="space-y-6">
@@ -97,6 +100,11 @@ export function MembershipHistory({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(m.endDate)}
+                    {m.renewedThrough && m.coverageThroughKey && (
+                      <span className="block text-xs text-muted-foreground">
+                        covered through {formatDayKey(m.coverageThroughKey)}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <StatusBadge
@@ -123,7 +131,9 @@ export function MembershipHistory({
                           status:
                             m.status === "EXPIRING_SOON" ? "EXPIRING_SOON" : "EXPIRED",
                         }}
-                        todayKey={todayKey}
+                        suggestedStart={m.suggestedStart}
+                        coverageThroughKey={m.coverageThroughKey}
+                        renewedThrough={m.renewedThrough}
                         plans={plans}
                         trigger={
                           <Button variant="outline" size="sm">

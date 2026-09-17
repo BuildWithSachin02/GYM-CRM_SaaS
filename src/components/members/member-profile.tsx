@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { formatDate, formatDateTime, formatMoney, fullName, pluralize } from "@/lib/format"
+import { formatDate, formatDateTime, formatDayKey, formatMoney, fullName, pluralize } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
 import type { MemberStatus, PaymentMethod } from "@prisma/client"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
@@ -69,6 +69,15 @@ type MemberProfileProps = {
       status: MembershipLifecycleStatus
       daysLeft: number | null
       daysUntilStart: number | null
+      /** True when this record is the member's primary/current display row. */
+      isPrimary: boolean
+      /** True when a later record continues coverage past this one's end. */
+      renewedThrough: boolean
+      /** Farthest valid coverage end (YYYY-MM-DD) across this member's records. */
+      coverageThroughKey: string | null
+      /** Member-level lifecycle (union of all records) for the primary row. */
+      memberStatus: MembershipLifecycleStatus
+      memberDaysLeft: number | null
       plan: {
         name: string
         billingInterval: string
@@ -327,16 +336,21 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
               </CardHeader>
               <CardContent className="space-y-3">
                 {member.memberships.map((membership) => {
-                  const statusEntry =
-                    MEMBERSHIP_LIFECYCLE_STATUS[membership.status]
+                  const statusKey = membership.isPrimary
+                    ? membership.memberStatus
+                    : membership.status
+                  const daysLeft = membership.isPrimary
+                    ? membership.memberDaysLeft
+                    : membership.daysLeft
+                  const statusEntry = MEMBERSHIP_LIFECYCLE_STATUS[statusKey]
                   const membershipStatus = {
                     tone: statusEntry?.tone ?? "muted",
-                    label: statusEntry?.label ?? membership.status,
+                    label: statusEntry?.label ?? statusKey,
                   }
                   const lifecycleNote =
-                    membership.status === "EXPIRING_SOON" && membership.daysLeft !== null
-                      ? ` · ${membership.daysLeft}d left`
-                      : membership.status === "UPCOMING" && membership.daysUntilStart !== null
+                    statusKey === "EXPIRING_SOON" && daysLeft !== null
+                      ? ` · ${daysLeft}d left`
+                      : statusKey === "UPCOMING" && membership.daysUntilStart !== null
                         ? ` · starts in ${membership.daysUntilStart}d`
                         : ""
 
@@ -358,6 +372,12 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                         <p>
                           Period: {formatDate(membership.startDate)} — {formatDate(membership.endDate)}
                         </p>
+                        {membership.renewedThrough && membership.coverageThroughKey && (
+                          <p>
+                            Covered through{" "}
+                            {formatDayKey(membership.coverageThroughKey)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )

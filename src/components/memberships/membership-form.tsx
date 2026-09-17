@@ -59,10 +59,12 @@ type MembershipFormValues = z.infer<typeof membershipFormSchema>
 type MembershipFormProps = {
   members: { id: string; firstName: string; lastName: string }[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
+  /** Business date (YYYY-MM-DD) in the org's timezone, from the server. */
+  todayKey: string
   trigger?: React.ReactNode
 }
 
-export function MembershipForm({ members, plans, trigger }: MembershipFormProps) {
+export function MembershipForm({ members, plans, todayKey, trigger }: MembershipFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -73,7 +75,7 @@ export function MembershipForm({ members, plans, trigger }: MembershipFormProps)
     defaultValues: {
       memberId: "",
       planId: "",
-      startDate: new Date().toISOString().slice(0, 10),
+      startDate: todayKey,
       amount: "",
       method: "CASH",
       notes: "",

@@ -196,11 +196,13 @@ export async function HomeTrendsSection({
  */
 export async function HomeRemainingSection({
   organizationId,
+  timeZone,
 }: {
   organizationId: string
+  timeZone: string
 }) {
   const { expiringMemberships, todayAppointments, overdueTasks } =
-    await getDashboardRemainingData(organizationId)
+    await getDashboardRemainingData(organizationId, timeZone)
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

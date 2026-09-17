@@ -11,6 +11,11 @@ import { cache } from "react"
 import { prisma } from "@/lib/prisma"
 import { dayKeyOf } from "@/lib/format"
 import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
+import {
+  dayKeyInTimeZone,
+  daysBetweenKeys,
+  pickPrimaryMembership,
+} from "@/lib/memberships"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -86,7 +91,7 @@ export async function getDashboardData(
     getDashboardStatsData(organizationId, timeZone),
     getDashboardTrendsData(organizationId),
     getDashboardActivityData(organizationId),
-    getDashboardRemainingData(organizationId),
+    getDashboardRemainingData(organizationId, timeZone),
   ])
 
   return {
@@ -209,7 +214,8 @@ export async function getDashboardActivityData(
  * (expiring, today's appointments, overdue tasks, upcoming appointments).
  */
 export async function getDashboardRemainingData(
-  organizationId: string
+  organizationId: string,
+  timeZone: string
 ): Promise<
   Pick<
     DashboardData,
@@ -218,7 +224,7 @@ export async function getDashboardRemainingData(
 > {
   const [expiringMemberships, todayAppointments, overdueTasks, nextWeekAppointments] =
     await Promise.all([
-      getExpiringMemberships(organizationId, startOfDay(new Date())),
+      getExpiringMemberships(organizationId, timeZone),
       getTodayAppointments(organizationId),
       getOverdueTasks(organizationId),
       getDashboardUpcomingAppointments(organizationId),
@@ -268,32 +274,59 @@ async function getAttendanceTrend(organizationId: string) {
   })
 }
 
-async function getExpiringMemberships(organizationId: string, todayStart: Date) {
-  const todayEnd = endOfDay(todayStart)
+/**
+ * Members whose *effective coverage* ends within the next 30 days.
+ *
+ * "Expiring" is derived from the member's full valid timeline (all non-
+ * cancelled records merged into coverage intervals), never from a single
+ * record's DB status. A member whose records chain back-to-back or overlap
+ * keeps their coverage (and so is NOT listed here) until the farthest covered
+ * day. Members not covered today (already expired, or only upcoming) are
+ * likewise excluded — they need a different follow-up, not an "expiring" badge.
+ */
+async function getExpiringMemberships(organizationId: string, timeZone: string) {
+  const today = new Date()
+  const todayKey = dayKeyInTimeZone(today, timeZone)
   const rows = await prisma.membership.findMany({
-    where: {
-      organizationId,
-      status: "ACTIVE",
-      startDate: { lte: todayEnd },
-      endDate: { gte: todayStart, lte: endOfDay(addDays(todayStart, 30)) },
-    },
-    orderBy: { endDate: "asc" },
-    take: 12,
+    where: { organizationId },
     select: {
       id: true,
+      memberId: true,
+      startDate: true,
       endDate: true,
+      status: true,
       plan: { select: { name: true } },
       member: { select: { id: true, firstName: true, lastName: true } },
     },
   })
-  return rows.map((m) => ({
-    id: m.id,
-    memberName: `${m.member.firstName} ${m.member.lastName}`,
-    memberId: m.member.id,
-    planName: m.plan.name,
-    endDate: m.endDate.toISOString(),
-    daysLeft: Math.max(0, Math.round((m.endDate.getTime() - Date.now()) / DAY)),
-  }))
+
+  const byMember = new Map<string, typeof rows>()
+  for (const r of rows) {
+    const list = byMember.get(r.member.id) ?? []
+    list.push(r)
+    byMember.set(r.member.id, list)
+  }
+
+  return Array.from(byMember.values())
+    .map((list) => {
+      const picked = pickPrimaryMembership(list, timeZone, today)
+      if (!picked) return null
+      const { row, coverage } = picked
+      if (!coverage.coveredToday || !coverage.currentInterval) return null
+      const daysLeft = daysBetweenKeys(todayKey, coverage.currentInterval.endKey)
+      if (daysLeft < 0 || daysLeft > 30) return null
+      return {
+        id: row.id,
+        memberName: `${row.member.firstName} ${row.member.lastName}`,
+        memberId: row.member.id,
+        planName: row.plan.name,
+        endDate: coverage.currentInterval.endKey,
+        daysLeft,
+      }
+    })
+    .filter((m): m is NonNullable<typeof m> => m !== null)
+    .sort((a, b) => a.daysLeft - b.daysLeft)
+    .slice(0, 12)
 }
 
 async function getOverdueTasks(organizationId: string) {
