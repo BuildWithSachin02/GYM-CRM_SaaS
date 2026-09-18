@@ -5,7 +5,9 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
+  ArrowRight,
   CalendarCheck,
+  Clock,
   CreditCard,
   Edit,
   FileText,
@@ -18,7 +20,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { formatDate, formatDateTime, formatDayKey, formatMoney, fullName, pluralize } from "@/lib/format"
+import { formatDate, formatDateTime, formatDayKey, formatMoney, formatTimeInZone, fullName, pluralize } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
 import type { MemberStatus, PaymentMethod } from "@prisma/client"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
@@ -26,6 +28,7 @@ import type { MembershipLifecycleStatus } from "@/lib/memberships"
 import { archiveMember } from "@/lib/actions/members"
 import { PageHeader } from "@/components/common/page-header"
 import { StatusBadge } from "@/components/common/status-badge"
+import { MemberAttendanceSummary } from "@/components/attendance/member-attendance-summary"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -95,13 +98,41 @@ type MemberProfileProps = {
       createdAt: string
       recordedBy: { name: string }
     }[]
+    checkIns: {
+      id: string
+      /** Attendance calendar day (YYYY-MM-DD) in the org's timezone. */
+      dayKey: string
+      source: "MANUAL" | "QR_SESSION"
+      checkedInAt: string
+      locationName: string | null
+    }[]
     checkInCount: number
   }
+  attendance: {
+    lifetime: {
+      totalVisits: number
+      thisMonth: number
+      thisYear: number
+      avgPerWeek: number
+      currentStreak: number
+      longestStreak: number
+    }
+    lastVisit: { dayKey: string; checkedInAt: string } | null
+  }
+  timeZone?: string
+  canViewAttendance: boolean
   canUpdate: boolean
   canArchive: boolean
 }
 
-export function MemberProfile({ member, canUpdate, canArchive }: MemberProfileProps) {
+export function MemberProfile({
+  member,
+  attendance,
+  timeZone = "UTC",
+  canViewAttendance,
+  canUpdate,
+  canArchive,
+}: MemberProfileProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
@@ -298,6 +329,83 @@ export function MemberProfile({ member, canUpdate, canArchive }: MemberProfilePr
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="size-4" /> Attendance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <MemberAttendanceSummary
+                compact
+                timeZone={timeZone}
+                totalVisits={attendance.lifetime.totalVisits}
+                thisMonth={attendance.lifetime.thisMonth}
+                thisYear={attendance.lifetime.thisYear}
+                avgPerWeek={attendance.lifetime.avgPerWeek}
+                lastVisit={attendance.lastVisit}
+              />
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Recent Attendance</p>
+                  {canViewAttendance && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      render={
+                        <Link href={`/dashboard/members/${member.id}/attendance`} />
+                      }
+                    >
+                      View Full Attendance{" "}
+                      <ArrowRight className="size-4" />
+                    </Button>
+                  )}
+                </div>
+                {member.checkIns.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    No check-ins recorded yet.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10 text-muted-foreground">#</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead>Location</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {member.checkIns.map((checkIn, index) => (
+                        <TableRow key={checkIn.id}>
+                          <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
+                          <TableCell>{formatDayKey(checkIn.dayKey)}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatTimeInZone(checkIn.checkedInAt, timeZone)}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge
+                              tone={checkIn.source === "QR_SESSION" ? "info" : "default"}
+                            >
+                              {checkIn.source === "QR_SESSION" ? "QR" : "Manual"}
+                            </StatusBadge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {checkIn.locationName ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

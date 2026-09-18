@@ -32,6 +32,42 @@ export function formatTime(d: Date | string | null | undefined): string {
 }
 
 /**
+ * Time-of-day rendered in a specific IANA timezone, so a check-in instant is
+ * never shifted into the viewer's local clock. Used for attendance timestamps.
+ */
+export function formatTimeInZone(
+  d: Date | string | null | undefined,
+  timeZone: string
+): string {
+  if (!d) return "—"
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(d))
+}
+
+/**
+ * Date + time rendered in a specific IANA timezone (see formatTimeInZone).
+ */
+export function formatDateTimeInZone(
+  d: Date | string | null | undefined,
+  timeZone: string
+): string {
+  if (!d) return "—"
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(d))
+}
+
+/**
  * Format a YYYY-MM-DD day key for display. Parses the components into a local
  * Date (avoids the `new Date("YYYY-MM-DD")` UTC shift) so the label reads the
  * same calendar day the key represents in the org's timezone.

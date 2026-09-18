@@ -12,6 +12,7 @@ import {
 } from "@/lib/memberships"
 
 import { MemberProfile } from "@/components/members/member-profile"
+import { getMemberAttendanceOverview } from "@/lib/domain/member-attendance"
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -101,6 +102,12 @@ export default async function MemberDetailPage({ params }: PageProps) {
   const today = new Date()
   const todayKey = dayKeyInTimeZone(today, timeZone)
 
+  const attendanceOverview = await getMemberAttendanceOverview(
+    user.organizationId,
+    member.id,
+    timeZone
+  )
+
   // Member-level coverage: the summary badge/labels come from the union of
   // every valid period (the same rule as the memberships list), so a record
   // that ended but is chained to future coverage never reads "expiring".
@@ -141,14 +148,18 @@ export default async function MemberDetailPage({ params }: PageProps) {
       paymentDate: p.paymentDate.toISOString(),
       createdAt: p.createdAt.toISOString(),
     })),
+    checkIns: attendanceOverview.recent,
     checkInCount: member._count.checkIns,
   }
 
   return (
     <MemberProfile
       member={serialized}
+      attendance={attendanceOverview}
+      timeZone={timeZone}
       canUpdate={can(user, "members:update")}
       canArchive={can(user, "members:archive")}
+      canViewAttendance={can(user, "attendance:view")}
     />
   )
 }
