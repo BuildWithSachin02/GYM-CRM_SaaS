@@ -7,6 +7,13 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
+import {
+  MINOR_PER_RUPEE,
+  exactMoney,
+  formatTick,
+  niceAxis,
+  type AxisSpec,
+} from "@/lib/chart-axis"
 
 const config = {
   revenue: {
@@ -19,7 +26,19 @@ type RevenueTrendChartProps = {
   data: { day: string; revenue: number }[]
 }
 
+/**
+ * Revenue trend area chart.
+ *
+ * NOTE ON UNITS: `revenue` is stored as integer minor units (paise). The chart
+ * normalizes to RUPEES once, at the boundary, and everything drawn (axis,
+ * tooltip) works in rupees. There is intentionally no paise↔rupee conversion
+ * inside the render pipeline — see the getRevenueAnalysis contract.
+ */
 export function RevenueTrendChart({ data }: RevenueTrendChartProps) {
+  const toRupees = (minor: number) => minor / MINOR_PER_RUPEE
+  const maxRupees = data.reduce((acc, d) => Math.max(acc, toRupees(d.revenue)), 0)
+  const axis: AxisSpec = niceAxis(maxRupees, 4, false)
+
   return (
     <ChartContainer config={config} className="h-56 w-full">
       <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -40,26 +59,19 @@ export function RevenueTrendChart({ data }: RevenueTrendChartProps) {
           tickFormatter={(v) => v}
         />
         <YAxis
-          width={42}
+          width={52}
           tickLine={false}
           axisLine={false}
           fontSize={12}
-          tickFormatter={(v: number) =>
-            v === 0 ? "0" : `${v >= 100000 ? `${Math.round(v / 1000)}k` : Math.round(v / 100)}`
-          }
+          domain={[0, axis.domainMax]}
+          ticks={axis.ticks}
+          tickFormatter={(v) => formatTick(v, true)}
         />
         <ChartTooltip
           cursor={false}
           content={
             <ChartTooltipContent
-              formatter={(value) => [
-                new Intl.NumberFormat("en-IN", {
-                  style: "currency",
-                  currency: "INR",
-                  maximumFractionDigits: 0,
-                }).format(Number(value)),
-                "Revenue",
-              ]}
+              formatter={(value) => [exactMoney(toRupees(Number(value))), "Revenue"]}
               indicator="dot"
             />
           }

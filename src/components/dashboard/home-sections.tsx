@@ -163,11 +163,14 @@ export async function HomeStatsSection({
  */
 export async function HomeTrendsSection({
   organizationId,
+  timeZone,
 }: {
   organizationId: string
+  timeZone: string
 }) {
   const { revenueTrend, attendanceTrend } = await getDashboardTrendsData(
-    organizationId
+    organizationId,
+    timeZone
   )
 
   return (

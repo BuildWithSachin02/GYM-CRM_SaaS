@@ -163,6 +163,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
                     value: p.amountMinor,
                   }))}
                   color="var(--primary)"
+                  money
                   formatter={(v) => formatMoney(v)}
                 />
               </CardContent>
@@ -182,6 +183,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
                       value: p.amountMinor,
                     }))}
                     color="var(--primary)"
+                    money
                     formatter={(v) => formatMoney(v)}
                   />
                 )}

@@ -2,15 +2,13 @@ import "server-only"
 
 import {
   endOfDay,
-  format,
   startOfDay,
-  subDays,
 } from "date-fns"
 import { cache } from "react"
 
 import { prisma } from "@/lib/prisma"
-import { dayKeyOf } from "@/lib/format"
 import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
+import { getAttendanceTrendByDay, getRevenueAnalysis } from "@/lib/analytics"
 import {
   dayKeyInTimeZone,
   daysBetweenKeys,
@@ -89,7 +87,7 @@ export async function getDashboardData(
 ): Promise<DashboardData> {
   const [statsData, trends, activity, remaining] = await Promise.all([
     getDashboardStatsData(organizationId, timeZone),
-    getDashboardTrendsData(organizationId),
+    getDashboardTrendsData(organizationId, timeZone),
     getDashboardActivityData(organizationId),
     getDashboardRemainingData(organizationId, timeZone),
   ])
@@ -123,9 +121,8 @@ export async function getDashboardStatsData(
   organizationId: string,
   timeZone: string
 ): Promise<DashboardStatsData> {
-  const todayStart = startOfDay(new Date())
   const todayEnd = endOfDay(new Date())
-  const todayKey = dayKeyOf(new Date())
+  const todayKey = dayKeyInTimeZone(new Date(), timeZone)
 
   const [
     lifecycleStats,
@@ -143,14 +140,9 @@ export async function getDashboardStatsData(
       where: { organizationId, deletedAt: null, status: "ACTIVE" },
     }),
     prisma.checkIn.count({ where: { organizationId, dayKey: todayKey } }),
-    prisma.payment.aggregate({
-      where: {
-        organizationId,
-        status: "RECORDED",
-        paymentDate: { gte: todayStart, lte: todayEnd },
-      },
-      _sum: { amountMinor: true },
-    }),
+    // Canonical today revenue: same org-timezone attribution as every other
+    // revenue chart (see getRevenueAnalysis).
+    getRevenueAnalysis(organizationId, timeZone, 1).then((r) => r.totalMinor),
     prisma.lead.count({ where: { organizationId, deletedAt: null, stage: "NEW" } }),
     prisma.lead.count({
       where: {
@@ -170,7 +162,7 @@ export async function getDashboardStatsData(
       expiringSoon7: lifecycleStats.members.EXPIRING_SOON,
       expiredCount: lifecycleStats.members.EXPIRED,
       todayAttendance,
-      todayRevenue: todayRevenue._sum.amountMinor ?? 0,
+      todayRevenue,
       newLeads,
       pendingFollowUps,
     },
@@ -180,15 +172,22 @@ export async function getDashboardStatsData(
 
 /**
  * Segment loader for the trend charts (revenue + attendance).
+ * Both trends use the same org-timezone day-key attribution as the stat
+ * cards, so "today's revenue" reconciles with the last point of the revenue
+ * trend and the attendance counts reconcile with the attendance trend.
  */
 export async function getDashboardTrendsData(
-  organizationId: string
+  organizationId: string,
+  timeZone: string
 ): Promise<Pick<DashboardData, "revenueTrend" | "attendanceTrend">> {
-  const [revenueTrend, attendanceTrend] = await Promise.all([
-    getRevenueTrend(organizationId, startOfDay(new Date())),
-    getAttendanceTrend(organizationId),
+  const [revenue, attendance] = await Promise.all([
+    getRevenueAnalysis(organizationId, timeZone, 30),
+    getAttendanceTrendByDay(organizationId, timeZone, 14),
   ])
-  return { revenueTrend, attendanceTrend }
+  return {
+    revenueTrend: revenue.trend.map((t) => ({ day: t.label, revenue: t.value })),
+    attendanceTrend: attendance.map((t) => ({ day: t.label, count: t.value })),
+  }
 }
 
 /**
@@ -234,44 +233,6 @@ export async function getDashboardRemainingData(
 
 function addDays(d: Date, n: number) {
   return new Date(d.getTime() + n * DAY)
-}
-
-async function getRevenueTrend(organizationId: string, todayStart: Date) {
-  const from = startOfDay(subDays(todayStart, 29))
-  const rows = await prisma.payment.groupBy({
-    by: ["paymentDate"],
-    where: {
-      organizationId,
-      status: "RECORDED",
-      paymentDate: { gte: from },
-    },
-    _sum: { amountMinor: true },
-  })
-  const byDay = new Map<string, number>()
-  for (const r of rows) {
-    const key = dayKeyOf(r.paymentDate)
-    byDay.set(key, (byDay.get(key) ?? 0) + (r._sum.amountMinor ?? 0))
-  }
-  return Array.from({ length: 30 }, (_, i) => {
-    const d = addDays(from, i)
-    const key = dayKeyOf(d)
-    return { day: format(d, "dd MMM"), revenue: byDay.get(key) ?? 0 }
-  })
-}
-
-async function getAttendanceTrend(organizationId: string) {
-  const from = startOfDay(subDays(new Date(), 13))
-  const rows = await prisma.checkIn.groupBy({
-    by: ["dayKey"],
-    where: { organizationId, checkedInAt: { gte: from } },
-    _count: { _all: true },
-  })
-  const byDay = new Map(rows.map((r) => [r.dayKey, r._count._all]))
-  return Array.from({ length: 14 }, (_, i) => {
-    const d = addDays(from, i)
-    const key = dayKeyOf(d)
-    return { day: format(d, "dd MMM"), count: byDay.get(key) ?? 0 }
-  })
 }
 
 /**

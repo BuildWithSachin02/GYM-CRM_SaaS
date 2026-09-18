@@ -60,7 +60,10 @@ export default async function DashboardPage() {
       </Suspense>
 
       <Suspense fallback={<HomeChartsSkeleton />}>
-        <HomeTrendsSection organizationId={user.organizationId} />
+        <HomeTrendsSection
+          organizationId={user.organizationId}
+          timeZone={user.organization.timezone}
+        />
       </Suspense>
 
       <Suspense fallback={<HomeCardsSkeleton />}>
