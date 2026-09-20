@@ -28,13 +28,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { EntityCombobox } from "@/components/ui/entity-combobox"
 import {
   Dialog,
@@ -146,7 +139,6 @@ export function LeadProfile({
   const [convertAmount, setConvertAmount] = useState(
     lead.interestedPlan ? String((lead.interestedPlan.priceMinor ?? 0) / 100) : ""
   )
-  const [convertMethod, setConvertMethod] = useState<string>("CASH")
   const [convertError, setConvertError] = useState<string | null>(null)
 
   const selectedPlan = plans.find((p) => p.id === convertPlanId)
@@ -199,7 +191,6 @@ export function LeadProfile({
         startDate: convertStartDate,
         durationDays: selectedPlan?.durationDays ?? 30,
         amountMinor,
-        method: convertMethod as "CASH" | "UPI" | "CARD" | "BANK_TRANSFER",
       })
 
       if (result.success) {
@@ -478,6 +469,7 @@ export function LeadProfile({
             <DialogTitle>Convert Lead to Member</DialogTitle>
             <DialogDescription>
               Create a member account and active membership for {lead.name}.
+              Payment is recorded separately when you receive it.
             </DialogDescription>
           </DialogHeader>
 
@@ -512,7 +504,7 @@ export function LeadProfile({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="convert-amount">Amount (₹) *</Label>
+                <Label htmlFor="convert-amount">Plan price (₹) *</Label>
                 <Input
                   id="convert-amount"
                   type="number"
@@ -523,21 +515,6 @@ export function LeadProfile({
                   placeholder="e.g. 999"
                 />
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="convert-method">Payment Method *</Label>
-              <Select value={convertMethod} onValueChange={(val) => setConvertMethod(val ?? "CASH")}>
-                <SelectTrigger id="convert-method" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="UPI">UPI</SelectItem>
-                  <SelectItem value="CARD">Card</SelectItem>
-                  <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </div>
 

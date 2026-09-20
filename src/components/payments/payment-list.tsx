@@ -50,6 +50,13 @@ import {
 } from "@/components/ui/select"
 import { PaymentForm } from "@/components/payments/payment-form"
 
+type SerializedMembershipLink = {
+  id: string
+  startDate: string
+  endDate: string
+  plan: { name: string }
+}
+
 type SerializedPayment = {
   id: string
   amountMinor: number
@@ -59,7 +66,23 @@ type SerializedPayment = {
   paymentDate: string
   createdAt: string
   member: { id: string; firstName: string; lastName: string; phone: string }
+  membership: SerializedMembershipLink | null
   recordedBy: { name: string }
+}
+
+type MemberOption = {
+  id: string
+  firstName: string
+  lastName: string
+  phone: string
+  memberships: {
+    id: string
+    startDate: string
+    endDate: string
+    amountMinor: number
+    status: string
+    plan: { name: string; priceMinor: number }
+  }[]
 }
 
 type PaymentListProps = {
@@ -68,7 +91,7 @@ type PaymentListProps = {
   totalPages: number
   filters: { q: string; method: string; from: string; to: string; page: number }
   canCreate: boolean
-  members: { id: string; firstName: string; lastName: string; phone: string }[]
+  members: MemberOption[]
 }
 
 const METHOD_OPTIONS: { value: string; label: string }[] = [
@@ -247,6 +270,7 @@ export function PaymentList({
                   <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Member</TableHead>
+                  <TableHead>For</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead>Status</TableHead>
@@ -280,6 +304,22 @@ export function PaymentList({
                         <span className="ml-2 text-xs text-muted-foreground">
                           {payment.member.phone}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {payment.membership ? (
+                          <span>
+                            {payment.membership.plan.name} Membership
+                            <span className="block text-xs">
+                              {formatDate(payment.membership.startDate)} →{" "}
+                              {formatDate(payment.membership.endDate)}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-xs italic">
+                            No membership linked
+                            {payment.status !== "RECORDED" && " (legacy)"}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="font-medium">
                         {formatMoney(payment.amountMinor)}

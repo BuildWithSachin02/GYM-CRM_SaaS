@@ -219,6 +219,21 @@ export function dayAfterYmd(ymd: string | null | undefined): string {
 }
 
 /**
+ * The calendar-day END key of a membership period that starts on `startKey`
+ * (YYYY-MM-DD) and lasts `durationDays` days — the plan's own configured
+ * duration, never a hard-coded 30/90/180/365.
+ *
+ * This is the exact convention membershipPeriodFromStart persists (end day =
+ * start day + durationDays calendar days, both inclusive), so a UI preview
+ * built with this helper always matches the period the server will actually
+ * store. A renewal period starting the day after the previous coverage ends
+ * therefore never overlaps that coverage.
+ */
+export function periodEndKey(startKey: string, durationDays: number): string {
+  return addDaysToKey(startKey, durationDays)
+}
+
+/**
  * Earliest allowed renewal start day key for a renew-eligible membership:
  *   - EXPIRED -> today (RENEWAL_AFTER_EXPIRY_DAYS = 0, no grace period)
  *   - EXPIRING_SOON -> the day after the current end date (back-to-back,
@@ -428,6 +443,34 @@ export function membershipCoverageStatus(
     }
   }
   return { status: "EXPIRED", daysLeft: 0, daysUntilStart: null }
+}
+
+/**
+ * Does the member genuinely need a renewal TODAY, based on their TOTAL
+ * coverage?
+ *
+ * This is the canonical "show the Renew button" rule for the memberships list
+ * and history views. It is a member-level decision, never a per-record one: a
+ * member whose records chain back-to-back or overlap stays ACTIVE through the
+ * FARTHEST valid end date, so they must NOT be offered a renewal even when one
+ * historical record individually reads EXPIRED/EXPIRING_SOON. Only when the
+ * member-level state is EXPIRED or EXPIRING_SOON (i.e. coverage has genuinely
+ * ended or is ending soon with no replacement coverage) is a renewal offered.
+ *
+ * Members with no valid coverage at all (CANCELLED/PAUSED-only history) can
+ * never be renewed through this flow — the owner uses "New Membership" instead.
+ */
+export function memberNeedsRenewal(
+  rows: readonly MembershipCoverageRow[],
+  timeZone: string,
+  todayKey: string
+): boolean {
+  const hasValidCoverage = rows.some(
+    (r) => r.status !== "CANCELLED" && r.status !== "PAUSED"
+  )
+  if (!hasValidCoverage) return false
+  const coverage = getMemberCoverage(rows, timeZone, todayKey)
+  return canRenewLifecycle(membershipCoverageStatus(coverage).status)
 }
 
 /**

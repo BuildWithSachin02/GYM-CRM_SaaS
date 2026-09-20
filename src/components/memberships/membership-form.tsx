@@ -31,13 +31,6 @@ import {
   FormMessage,
   FormServerError,
 } from "@/components/ui/form"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const membershipFormSchema = z.object({
@@ -50,7 +43,6 @@ const membershipFormSchema = z.object({
     .min(1, "Enter an amount")
     .refine((v) => !Number.isNaN(Number(v)), "Enter a valid amount")
     .refine((v) => Number(v) > 0, "Amount must be positive"),
-  method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"]),
   notes: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
@@ -61,23 +53,34 @@ type MembershipFormProps = {
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   /** Business date (YYYY-MM-DD) in the org's timezone, from the server. */
   todayKey: string
+  /** Lock the form to one member (e.g. from a member profile page). */
+  defaultMemberId?: string
   trigger?: React.ReactNode
 }
 
-export function MembershipForm({ members, plans, todayKey, trigger }: MembershipFormProps) {
+export function MembershipForm({
+  members,
+  plans,
+  todayKey,
+  defaultMemberId,
+  trigger,
+}: MembershipFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [serverError, setServerError] = useState<string | null>(null)
 
+  const lockedMember = defaultMemberId
+    ? members.find((m) => m.id === defaultMemberId) ?? null
+    : null
+
   const form = useForm<MembershipFormValues>({
     resolver: zodResolver(membershipFormSchema),
     defaultValues: {
-      memberId: "",
+      memberId: defaultMemberId ?? "",
       planId: "",
       startDate: todayKey,
       amount: "",
-      method: "CASH",
       notes: "",
     },
   })
@@ -111,7 +114,6 @@ export function MembershipForm({ members, plans, todayKey, trigger }: Membership
         startDate: data.startDate,
         durationDays: selectedPlan.durationDays,
         amountMinor: Math.round(Number(data.amount) * 100),
-        method: data.method,
         notes: data.notes || null,
       })
 
@@ -152,7 +154,10 @@ export function MembershipForm({ members, plans, todayKey, trigger }: Membership
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New Membership</DialogTitle>
-          <DialogDescription>Create a new membership for a member.</DialogDescription>
+          <DialogDescription>
+            Assign a plan to this member. Payment is recorded separately when
+            you receive it.
+          </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
@@ -166,16 +171,24 @@ export function MembershipForm({ members, plans, todayKey, trigger }: Membership
                 <FormItem>
                   <FormLabel>Member *</FormLabel>
                   <FormControl>
-                    <EntityCombobox
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      options={members.map((m) => ({
-                        id: m.id,
-                        label: fullName(m.firstName, m.lastName),
-                      }))}
-                      placeholder="Search or select a member"
-                      emptyText="No members found."
-                    />
+                    {lockedMember ? (
+                      <Input
+                        value={fullName(lockedMember.firstName, lockedMember.lastName)}
+                        readOnly
+                        disabled
+                      />
+                    ) : (
+                      <EntityCombobox
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        options={members.map((m) => ({
+                          id: m.id,
+                          label: fullName(m.firstName, m.lastName),
+                        }))}
+                        placeholder="Search or select a member"
+                        emptyText="No members found."
+                      />
+                    )}
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -225,7 +238,7 @@ export function MembershipForm({ members, plans, todayKey, trigger }: Membership
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount (₹) *</FormLabel>
+                    <FormLabel>Plan price (₹) *</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -241,35 +254,6 @@ export function MembershipForm({ members, plans, todayKey, trigger }: Membership
                 )}
               />
             </div>
-
-            <FormField
-              control={form.control}
-              name="method"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Payment Method *</FormLabel>
-                  <FormControl>
-                    <Select
-                      value={field.value}
-                      onValueChange={(val) =>
-                        field.onChange(val as MembershipFormValues["method"])
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CASH">Cash</SelectItem>
-                        <SelectItem value="UPI">UPI</SelectItem>
-                        <SelectItem value="CARD">Card</SelectItem>
-                        <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             <FormField
               control={form.control}

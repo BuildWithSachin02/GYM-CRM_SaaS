@@ -14,8 +14,10 @@ import {
   getMembershipLifecycle,
   membershipCoverageStatus,
   membershipPeriodFromStart,
+  memberNeedsRenewal,
   mergeMembershipPeriods,
   nextValidRenewalStartKey,
+  periodEndKey,
   pickPrimaryMembership,
   periodsOverlap,
   RENEWAL_AFTER_EXPIRY_DAYS,
@@ -48,6 +50,46 @@ test("addDurationDays rolls across month boundaries without off-by-one", () => {
 test("addDurationDays handles leap-year February and year boundaries", () => {
   assert.equal(toYmd(addDurationDays(ymd(2024, 1, 31), 30)), "2024-03-01")
   assert.equal(toYmd(addDurationDays(ymd(2026, 12, 1), 31)), "2027-01-01")
+})
+
+// ---------------------------------------------------------------------------
+// Renewal period calculation (Requirement 3): the UI previews the new end date
+// with periodEndKey, which MUST equal what the server persists (end = start +
+// durationDays, both inclusive) — no competing date engine.
+// ---------------------------------------------------------------------------
+test("renewal end dates for plan durations: monthly 30-day and quarterly 90-day", () => {
+  // Monthly (30 days): day after coverage 2026-09-18 -> 2026-09-19 -> end 2026-10-19.
+  assert.equal(periodEndKey("2026-09-19", 30), "2026-10-19")
+  // Monthly (30 days) from a month-start -> 2026-10-31.
+  assert.equal(periodEndKey("2026-10-01", 30), "2026-10-31")
+  // Quarterly (90 days) -> 2026-12-30.
+  assert.equal(periodEndKey("2026-10-01", 90), "2026-12-30")
+})
+
+test("renewal period from plan duration never overlaps the previous coverage", () => {
+  // Previous inclusive coverage ends 2026-09-18; renewal starts the day after
+  // and lasts the plan's 30 days. Back-to-back (no gap, no overlap).
+  const previousEnd = "2026-09-18"
+  const start = dayAfterYmd(previousEnd)
+  const end = periodEndKey(start, 30)
+  assert.equal(start, "2026-09-19")
+  assert.equal(end, "2026-10-19")
+  assert.equal(
+    periodsOverlap(
+      ymd(2026, 8, 20),
+      ymd(2026, 9, 18),
+      ymd(2026, 9, 19),
+      ymd(2026, 10, 19)
+    ),
+    false
+  )
+})
+
+test("periodEndKey mirrors the persisted end-date convention across intervals", () => {
+  // Half-yearly (180 days) and yearly (365 days) per plan durations.
+  assert.equal(periodEndKey("2026-07-05", 180), "2027-01-01")
+  assert.equal(periodEndKey("2026-01-01", 365), "2027-01-01")
+  assert.equal(periodEndKey("2026-09-18", 90), "2026-12-17")
 })
 
 // ---------------------------------------------------------------------------
@@ -253,8 +295,8 @@ test("back-to-back coverage: member with a chain keeps ACTIVE (not expiring soon
     nextValidRenewalStartKey(rows, "Asia/Kolkata", "2026-09-17"),
     "2027-01-18"
   )
-  // The record-level state of A (ends today) is still renew-eligible, so the
-  // Renew button stays available.
+  // The record-level state of A (ends today) is still renew-eligible as a
+  // standalone fact...
   const a = getMembershipLifecycle({
     startDate: rows[0].startDate,
     endDate: rows[0].endDate,
@@ -264,6 +306,10 @@ test("back-to-back coverage: member with a chain keeps ACTIVE (not expiring soon
   })
   assert.equal(a.status, "EXPIRING_SOON")
   assert.equal(canRenewLifecycle(a.status), true)
+
+  // ...but the MAIN-LIST "Renew" decision is member-level (total coverage):
+  // this continuously covered member must NOT be offered a renewal.
+  assert.equal(memberNeedsRenewal(rows, "Asia/Kolkata", "2026-09-17"), false)
 })
 
 test("renewal suggestion opens the modal clean: default start never overlaps coverage", () => {
@@ -595,4 +641,94 @@ test("pickPrimaryMembership keeps CANCELLED memberships visible when no valid co
 
 test("pickPrimaryMembership returns null for an empty history", () => {
   assert.equal(pickPrimaryMembership([], "UTC"), null)
+})
+
+// ---------------------------------------------------------------------------
+// Member-level "needs renewal" rule (the round-2 fix)
+//
+// The main memberships list and the history view decide the Renew button from
+// the member's TOTAL coverage (memberNeedsRenewal), never from a single
+// record's expiry. These cases mirror the King's Gym QA spec (TEST 13-20).
+// ---------------------------------------------------------------------------
+
+test("TEST 13: expired member with no future coverage → Renew is offered", () => {
+  const rows = [row("old", "2025-01-01", "2025-03-31", "EXPIRED")]
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), true)
+})
+
+test("TEST 14: active member expiring within 5 days with no later coverage → Renew is offered", () => {
+  const rows = [row("current", "2026-09-01", "2026-09-22", "ACTIVE")]
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), true) // 5 days left
+})
+
+test("TEST 15: active member with contiguous future coverage → NO Renew (chain continues)", () => {
+  const rows = [
+    row("current", "2026-06-01", "2026-09-17", "ACTIVE"),
+    row("future", "2026-09-18", "2026-10-17", "ACTIVE"), // back-to-back
+  ]
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), false)
+})
+
+test("TEST 16: Ananya Joshi continuous chain → NO Renew on the main list (the regression case)", () => {
+  // King's Gym QA data: 12 Jan→17 Sep 2026 (record 1), 18 Sep→18 Oct 2026
+  // (record 2), 19 Oct 2026→17 Jan 2027 (record 3). Coverage is continuous
+  // through 17 Jan 2027, so even though record 1 individually expired, the
+  // member-level Renew flag must be false.
+  const rows = [
+    row("m1", "2026-01-12", "2026-09-17", "EXPIRED"),
+    row("m2", "2026-09-18", "2026-10-18", "ACTIVE"),
+    row("m3", "2026-10-19", "2027-01-17", "ACTIVE"),
+  ]
+  // Today ~18/19 Sep 2026 (and on record 1's final day too).
+  assert.equal(memberNeedsRenewal(rows, "Asia/Kolkata", "2026-09-17"), false)
+  assert.equal(memberNeedsRenewal(rows, "Asia/Kolkata", "2026-09-18"), false)
+  assert.equal(memberNeedsRenewal(rows, "Asia/Kolkata", "2026-09-19"), false)
+})
+
+test("TEST 17: expired historical record + separate ACTIVE current record → NO Renew", () => {
+  const rows = [
+    row("history", "2025-10-01", "2025-12-31", "EXPIRED"),
+    row("current", "2026-04-01", "2026-09-30", "ACTIVE"),
+  ]
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), false)
+})
+
+test("TEST 18: multiple continuous memberships → no false Renew (farthest coverage governs)", () => {
+  const rows = [
+    row("f1", "2026-10-01", "2026-10-30", "ACTIVE"),
+    row("f2", "2026-10-31", "2026-11-29", "ACTIVE"),
+    row("f3", "2026-11-30", "2027-01-28", "ACTIVE"),
+  ]
+  // None started yet: member-level status is UPCOMING → no renewal offer.
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), false)
+})
+
+test("TEST 19: active expiring with a REAL gap before future coverage → Renew is offered", () => {
+  const rows = [
+    row("now", "2026-08-01", "2026-09-17", "ACTIVE"),
+    row("later", "2026-09-22", "2026-10-21", "ACTIVE"), // 4 uncovered days
+  ]
+  // Coverage is NOT continuous (the gap is real) → member is expiring soon.
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), true)
+})
+
+test("TEST 20: gap between memberships → coverage splits and reflects the actual gap", () => {
+  const rows = [
+    row("early", "2026-01-01", "2026-09-30", "EXPIRED"),
+    row("late", "2026-10-02", "2026-10-31", "ACTIVE"), // 2026-10-01 is a hole
+  ]
+  const coverage = getMemberCoverage(rows, "UTC", "2026-10-01")
+  assert.equal(coverage.intervals.length, 2)
+  assert.equal(coverage.coveredToday, false)
+  // On the hole day the member is uncovered but has reserved future coverage:
+  // UPCOMING (starts tomorrow), and NO renewal is offered.
+  const inTheHole = membershipCoverageStatus(coverage)
+  assert.equal(inTheHole.status, "UPCOMING")
+  assert.equal(inTheHole.daysUntilStart, 1)
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-10-01"), false)
+})
+
+test("no valid coverage (CANCELLED-only) never offers Renew — use New Membership instead", () => {
+  const rows = [row("cancelled", "2026-01-01", "2026-12-31", "CANCELLED")]
+  assert.equal(memberNeedsRenewal(rows, "UTC", "2026-09-17"), false)
 })

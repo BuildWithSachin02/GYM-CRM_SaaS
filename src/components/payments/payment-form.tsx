@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 
-import { fullName } from "@/lib/format"
+import { formatDate, formatMoney, fullName } from "@/lib/format"
 import { recordPayment } from "@/lib/actions/payments"
 
 import { Button } from "@/components/ui/button"
@@ -44,6 +44,7 @@ const PAYMENT_METHODS = ["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const
 
 const paymentFormSchema = z.object({
   memberId: z.string().min(1, "Select a member"),
+  membershipId: z.string().min(1, "Select the membership this payment is for"),
   amount: z
     .string()
     .trim()
@@ -59,8 +60,25 @@ const paymentFormSchema = z.object({
 
 type PaymentFormValues = z.infer<typeof paymentFormSchema>
 
+type MemberMembership = {
+  id: string
+  startDate: string
+  endDate: string
+  amountMinor: number
+  status: string
+  plan: { name: string; priceMinor: number }
+}
+
+type MemberOption = {
+  id: string
+  firstName: string
+  lastName: string
+  phone: string
+  memberships: MemberMembership[]
+}
+
 type PaymentFormProps = {
-  members: { id: string; firstName: string; lastName: string; phone: string }[]
+  members: MemberOption[]
   trigger?: React.ReactNode
 }
 
@@ -74,6 +92,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
     resolver: zodResolver(paymentFormSchema),
     defaultValues: {
       memberId: "",
+      membershipId: "",
       amount: "",
       method: "CASH",
       paymentDate: new Date().toISOString().slice(0, 10),
@@ -82,11 +101,38 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
     },
   })
 
+  const selectedMemberId = useWatch({ control: form.control, name: "memberId" })
+  const selectedMembershipId = useWatch({ control: form.control, name: "membershipId" })
+  const amountValue = useWatch({ control: form.control, name: "amount" })
+
+  const selectedMember = useMemo(
+    () => members.find((m) => m.id === selectedMemberId) ?? null,
+    [members, selectedMemberId]
+  )
+  const memberMemberships = useMemo(
+    () => selectedMember?.memberships ?? [],
+    [selectedMember]
+  )
+
+  const selectedMembership = useMemo(
+    () => memberMemberships.find((ms) => ms.id === selectedMembershipId) ?? null,
+    [memberMemberships, selectedMembershipId]
+  )
+
+  const chargedMinor = Math.round(Number(amountValue || "0") * 100)
+  const amountDiffers =
+    selectedMembership !== null &&
+    chargedMinor > 0 &&
+    chargedMinor !== selectedMembership.amountMinor
+
+  const noMemberships = selectedMember !== null && memberMemberships.length === 0
+
   function onSubmit(data: PaymentFormValues) {
     setServerError(null)
     startTransition(async () => {
       const result = await recordPayment({
         memberId: data.memberId,
+        membershipId: data.membershipId,
         amountMinor: Math.round(Number(data.amount) * 100),
         method: data.method,
         paymentDate: data.paymentDate,
@@ -122,7 +168,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
         <DialogHeader>
           <DialogTitle>Record Payment</DialogTitle>
           <DialogDescription>
-            Log a manual payment received from a member.
+            Record a payment against one of the member&apos;s memberships.
           </DialogDescription>
         </DialogHeader>
 
@@ -139,7 +185,11 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                   <FormControl>
                     <EntityCombobox
                       value={field.value}
-                      onValueChange={(val) => field.onChange(val ?? "")}
+                      onValueChange={(val) => {
+                        field.onChange(val ?? "")
+                        form.setValue("membershipId", "")
+                        form.setValue("amount", "")
+                      }}
                       options={members.map((m) => ({
                         id: m.id,
                         label: fullName(m.firstName, m.lastName),
@@ -153,6 +203,66 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                 </FormItem>
               )}
             />
+
+            <FormField
+              control={form.control}
+              name="membershipId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Payment For (Membership) *</FormLabel>
+                  <FormControl>
+                    <EntityCombobox
+                      value={field.value}
+                      onValueChange={(val) => {
+                        field.onChange(val ?? "")
+                        const picked = memberMemberships.find((ms) => ms.id === val)
+                        if (picked) form.setValue("amount", String(picked.amountMinor / 100))
+                      }}
+                      options={memberMemberships.map((ms) => ({
+                        id: ms.id,
+                        label: `${ms.plan.name} · ${formatDate(ms.startDate)} → ${formatDate(ms.endDate)}`,
+                        sublabel: formatMoney(ms.amountMinor),
+                      }))}
+                      placeholder={
+                        selectedMember
+                          ? "Select the membership this payment settles"
+                          : "Select a member first"
+                      }
+                      emptyText="This member has no memberships."
+                      disabled={!selectedMember}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                  {noMemberships && (
+                    <p className="text-xs text-muted-foreground">
+                      This member has no memberships. Create a membership first — every
+                      payment must be linked to a membership.
+                    </p>
+                  )}
+                </FormItem>
+              )}
+            />
+
+            {selectedMembership && (
+              <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-xs">
+                <p className="font-medium text-foreground">
+                  {selectedMembership.plan.name} Membership
+                </p>
+                <p className="text-muted-foreground">
+                  {formatDate(selectedMembership.startDate)} →{" "}
+                  {formatDate(selectedMembership.endDate)}
+                </p>
+                <p className="text-muted-foreground">
+                  Plan price: {formatMoney(selectedMembership.plan.priceMinor)}
+                </p>
+                {amountDiffers && (
+                  <p className="text-foreground">
+                    Actual charged: {formatMoney(chargedMinor)} (membership recorded at{" "}
+                    {formatMoney(selectedMembership.amountMinor)})
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <FormField
@@ -268,7 +378,10 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending || !selectedMembershipId || noMemberships}
+              >
                 {isPending ? "Recording..." : "Record Payment"}
               </Button>
             </DialogFooter>

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useMemo, useState, useTransition } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,6 +14,8 @@ import {
   Mail,
   MapPin,
   Phone,
+  Plus,
+  RefreshCw,
   Trash2,
   UserCircle,
   Zap,
@@ -22,7 +24,8 @@ import { toast } from "sonner"
 
 import { formatDate, formatDateTime, formatDayKey, formatMoney, formatTimeInZone, fullName, pluralize } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
-import type { MemberStatus, PaymentMethod } from "@prisma/client"
+import { getSafeReturnPath } from "@/lib/navigation"
+import type { MemberStatus, PaymentMethod, PaymentStatus } from "@prisma/client"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
 import { archiveMember } from "@/lib/actions/members"
@@ -47,6 +50,8 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { MemberForm } from "@/components/members/member-form"
+import { MembershipForm } from "@/components/memberships/membership-form"
+import { RenewalForm } from "@/components/memberships/renewal-form"
 
 type MemberProfileProps = {
   member: {
@@ -72,6 +77,8 @@ type MemberProfileProps = {
       status: MembershipLifecycleStatus
       daysLeft: number | null
       daysUntilStart: number | null
+      /** Amount actually charged for this membership (minor units). */
+      amountMinor: number
       /** True when this record is the member's primary/current display row. */
       isPrimary: boolean
       /** True when a later record continues coverage past this one's end. */
@@ -92,10 +99,17 @@ type MemberProfileProps = {
       id: string
       amountMinor: number
       method: PaymentMethod
+      status: PaymentStatus
       paymentDate: string
       reference: string | null
       notes: string | null
       createdAt: string
+      membership: {
+        id: string
+        startDate: string
+        endDate: string
+        plan: { name: string }
+      } | null
       recordedBy: { name: string }
     }[]
     checkIns: {
@@ -123,6 +137,24 @@ type MemberProfileProps = {
   canViewAttendance: boolean
   canUpdate: boolean
   canArchive: boolean
+  canManageMemberships: boolean
+  /** Active plans the owner can sell from this profile. */
+  plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
+  /** Business date (YYYY-MM-DD) in the org's timezone. */
+  todayKey: string
+  /** Renewal context when the member genuinely needs a renewal today (server
+   * decision — null otherwise) so the profile opens the auto-dated renewal
+   * modal instead of the plain "new membership" form. */
+  renewal: {
+    membershipId: string
+    planId: string
+    planName: string
+    endDate: string
+    status: "EXPIRED" | "EXPIRING_SOON"
+    suggestedStart: string
+    coverageThroughKey: string | null
+    renewedThrough: boolean
+  } | null
 }
 
 export function MemberProfile({
@@ -132,13 +164,25 @@ export function MemberProfile({
   canViewAttendance,
   canUpdate,
   canArchive,
+  canManageMemberships,
+  plans,
+  todayKey,
+  renewal,
 }: MemberProfileProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
 
   const name = fullName(member.firstName, member.lastName)
   const statusEntry = MEMBER_STATUS[member.status]
+
+  // Return to the exact dashboard list the user came from (Memberships list
+  // or Plan members), validated so a crafted ?returnTo= can never open-redirect.
+  const backHref = useMemo(
+    () => getSafeReturnPath(searchParams.get("returnTo"), "/dashboard/members"),
+    [searchParams]
+  )
 
   function handleArchive() {
     startTransition(async () => {
@@ -160,9 +204,51 @@ export function MemberProfile({
         description={`Member since ${formatDate(member.createdAt)}`}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="ghost" render={<Link href="/dashboard/members" />}>
+            <Button variant="ghost" render={<Link href={backHref} />}>
               <ArrowLeft className="size-4" /> Back
             </Button>
+            {canManageMemberships && member.status !== "ARCHIVED" && (
+              renewal ? (
+                <RenewalForm
+                  membership={{
+                    id: renewal.membershipId,
+                    memberId: member.id,
+                    memberName: name,
+                    planId: renewal.planId,
+                    planName: renewal.planName,
+                    endDate: renewal.endDate,
+                    status: renewal.status,
+                  }}
+                  suggestedStart={renewal.suggestedStart}
+                  coverageThroughKey={renewal.coverageThroughKey}
+                  renewedThrough={renewal.renewedThrough}
+                  plans={plans}
+                  trigger={
+                    <Button>
+                      <RefreshCw className="size-4" /> Renew Membership
+                    </Button>
+                  }
+                />
+              ) : (
+                <MembershipForm
+                  members={[
+                    {
+                      id: member.id,
+                      firstName: member.firstName,
+                      lastName: member.lastName,
+                    },
+                  ]}
+                  plans={plans}
+                  todayKey={todayKey}
+                  defaultMemberId={member.id}
+                  trigger={
+                    <Button>
+                      <Plus className="size-4" /> Add Membership
+                    </Button>
+                  }
+                />
+              )
+            )}
             {canUpdate && (
               <MemberForm
                 member={member}
@@ -295,6 +381,7 @@ export function MemberProfile({
                       <TableHead className="w-10 text-muted-foreground">#</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Amount</TableHead>
+                      <TableHead>For</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Recorded by</TableHead>
                       <TableHead>Reference</TableHead>
@@ -311,6 +398,19 @@ export function MemberProfile({
                           <TableCell>{formatDate(payment.paymentDate)}</TableCell>
                           <TableCell className="font-medium">
                             {formatMoney(payment.amountMinor)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {payment.membership ? (
+                              <span>
+                                {payment.membership.plan.name} Membership
+                                <span className="block text-xs">
+                                  {formatDate(payment.membership.startDate)} →{" "}
+                                  {formatDate(payment.membership.endDate)}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-xs italic">Standalone</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <StatusBadge tone={methodEntry?.tone ?? "muted"}>
@@ -473,19 +573,31 @@ export function MemberProfile({
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">
                         <p>Interval: {PLAN_INTERVAL[membership.plan.billingInterval as keyof typeof PLAN_INTERVAL]?.label ?? membership.plan.billingInterval}</p>
-                        <p>Price: {formatMoney(membership.plan.priceMinor)}</p>
+                        <p>
+                          Price: {formatMoney(membership.amountMinor)}
+                          {membership.amountMinor !== membership.plan.priceMinor && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              (plan {formatMoney(membership.plan.priceMinor)})
+                            </span>
+                          )}
+                        </p>
                         <p>
                           Duration: {membership.plan.durationDays} {pluralize(membership.plan.durationDays, "day")}
                         </p>
                         <p>
                           Period: {formatDate(membership.startDate)} — {formatDate(membership.endDate)}
                         </p>
-                        {membership.renewedThrough && membership.coverageThroughKey && (
-                          <p>
-                            Covered through{" "}
-                            {formatDayKey(membership.coverageThroughKey)}
-                          </p>
-                        )}
+                        {(statusKey === "ACTIVE" ||
+                            statusKey === "EXPIRING_SOON" ||
+                            statusKey === "UPCOMING") &&
+                            membership.renewedThrough &&
+                            membership.coverageThroughKey && (
+                              <p>
+                                Covered through{" "}
+                                {formatDayKey(membership.coverageThroughKey)}
+                              </p>
+                            )}
                       </div>
                     </div>
                   )

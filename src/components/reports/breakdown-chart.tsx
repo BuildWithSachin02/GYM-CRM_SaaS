@@ -8,11 +8,13 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import {
-  MINOR_PER_RUPEE,
+  exactMoney,
   formatTick,
+  moneyAxisFromMinor,
   niceAxis,
   type AxisSpec,
 } from "@/lib/chart-axis"
+import { minorToRupees } from "@/lib/format"
 
 const config = {
   value: {
@@ -24,24 +26,25 @@ const config = {
 type BreakdownChartProps = {
   data: { label: string; value: number }[]
   color?: string
-  formatter?: (value: number) => string
-  /** Values are money in minor units (paise); axis/tooltips render rupees. */
+  /** Values are money in minor units (paise); converted to rupees once at the plot boundary. */
   money?: boolean
 }
 
 export function BreakdownChart({
   data,
   color = "var(--primary)",
-  formatter,
   money = false,
 }: BreakdownChartProps) {
-  const toPlotUnit = (v: number) => (money ? v / MINOR_PER_RUPEE : v)
-  const maxPlot = data.reduce((acc, d) => Math.max(acc, toPlotUnit(d.value)), 0)
-  const axis: AxisSpec = niceAxis(maxPlot, 4, !money)
+  const maxMinor = data.reduce((acc, d) => Math.max(acc, d.value), 0)
+  const axis: AxisSpec = money
+    ? moneyAxisFromMinor(maxMinor)
+    : niceAxis(maxMinor, 4, true)
+  const toPlotUnit = (v: number) => (money ? minorToRupees(v) : v)
+  const plotData = data.map((d) => ({ ...d, value: toPlotUnit(d.value) }))
 
   return (
     <ChartContainer config={config} className="h-56 w-full">
-      <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <BarChart data={plotData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
         <XAxis
           dataKey="label"
@@ -65,9 +68,14 @@ export function BreakdownChart({
           cursor={false}
           content={
             <ChartTooltipContent
-              formatter={(value) =>
-                formatter ? [formatter(Number(value)), "Value"] : [Number(value).toLocaleString(), "Value"]
-              }
+              formatter={(value) => (
+                <>
+                  <span className="font-mono font-medium text-foreground tabular-nums">
+                    {money ? exactMoney(Number(value)) : Number(value).toLocaleString()}
+                  </span>
+                  <span className="text-muted-foreground">Value</span>
+                </>
+              )}
               indicator="dot"
             />
           }

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow } from "@/lib/auth/auth"
 import { paymentSchema, type PaymentInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { checkMembershipPaymentLink } from "@/lib/payments"
 
 export type PaymentActionResult =
   | { success: true; data: { id: string } }
@@ -36,11 +37,28 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
     return { success: false, error: "Member not found" }
   }
 
+  // Every payment must be tied to a membership that really belongs to this
+  // member in this organization. Never trust memberId + membershipId from the
+  // client. A member-only (standalone) payment is rejected by the rule.
+  const membership = await prisma.membership.findFirst({
+    where: { id: data.membershipId, organizationId: user.organizationId },
+    select: { id: true, memberId: true, organizationId: true, status: true },
+  })
+
+  const link = checkMembershipPaymentLink(
+    { memberId: data.memberId, membershipId: data.membershipId },
+    membership,
+    user.organizationId
+  )
+  if (!link.ok) {
+    return { success: false, error: link.error }
+  }
+
   const payment = await prisma.payment.create({
     data: {
       organizationId: user.organizationId,
       memberId: data.memberId,
-      membershipId: data.membershipId ?? null,
+      membershipId: link.membershipId,
       amountMinor: data.amountMinor,
       method: data.method,
       paymentDate: data.paymentDate,
@@ -67,6 +85,7 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
   })
 
   revalidatePath("/dashboard/payments")
+  revalidatePath(`/dashboard/members/${data.memberId}`)
 
   return { success: true, data: { id: payment.id } }
 }
@@ -82,7 +101,7 @@ export async function voidPayment(paymentId: string): Promise<PaymentActionResul
       amountMinor: true,
       method: true,
       paymentDate: true,
-      member: { select: { firstName: true, lastName: true } },
+      member: { select: { id: true, firstName: true, lastName: true } },
       recordedBy: { select: { name: true } },
     },
   })
@@ -111,6 +130,7 @@ export async function voidPayment(paymentId: string): Promise<PaymentActionResul
   })
 
   revalidatePath("/dashboard/payments")
+  revalidatePath(`/dashboard/members/${existing.member.id}`)
 
   return { success: true, data: { id: paymentId } }
 }

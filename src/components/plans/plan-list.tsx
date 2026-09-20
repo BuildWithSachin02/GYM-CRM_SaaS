@@ -21,7 +21,8 @@ type SerializedPlan = {
   description: string | null
   active: boolean
   updatedAt: string
-  _count: { memberships: number }
+  /** Distinct members with a non-cancelled membership on this plan. */
+  memberCount: number
 }
 
 type PlanListProps = {

@@ -109,8 +109,10 @@ export const membershipCreateSchema = z.object({
   planId: z.string().uuid("Invalid plan"),
   startDate: requiredDate(),
   durationDays: z.number().int().positive(),
+  // amountMinor is the AGREED membership price only. It is not received
+  // money: no payment is created by assigning a membership. Actual revenue is
+  // recorded separately through Record Payment (paymentSchema).
   amountMinor: z.number().int().positive("Amount must be positive"),
-  method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const),
   notes: optionalText(500),
 })
 
@@ -122,7 +124,6 @@ export const membershipRenewSchema = z.object({
   startDate: requiredDate(),
   durationDays: z.number().int().positive(),
   amountMinor: z.number().int().positive("Amount must be positive"),
-  method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const),
   notes: optionalText(500),
   expiryDate: z.string().optional().nullable(),
 })
@@ -133,7 +134,10 @@ export type MembershipRenewInput = z.input<typeof membershipRenewSchema>
 
 export const paymentSchema = z.object({
   memberId: z.string().uuid("Invalid member"),
-  membershipId: z.string().uuid("Invalid membership").optional().nullable(),
+  // Required: every payment must settle a specific membership (no standalone
+  // member-only payments). The server action re-verifies that the membership
+  // belongs to this member and organization.
+  membershipId: z.string().uuid("Select the membership this payment is for"),
   amountMinor: z.number().int().positive("Amount must be positive"),
   method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const),
   paymentDate: requiredDate(),
@@ -191,7 +195,6 @@ export const leadConvertSchema = z.object({
   startDate: requiredDateTime(),
   durationDays: z.number().int().positive(),
   amountMinor: z.number().int().positive("Amount must be positive"),
-  method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"] as const),
 })
 
 export type LeadConvertInput = z.infer<typeof leadConvertSchema>

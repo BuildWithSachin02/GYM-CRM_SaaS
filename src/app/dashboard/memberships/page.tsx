@@ -5,11 +5,11 @@ import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
 import {
-  canRenewLifecycle,
   dayKeyInTimeZone,
   getMemberCoverage,
   getMembershipLifecycle,
   LIFECYCLE_STATUS_ORDER,
+  memberNeedsRenewal,
   nextValidRenewalStartKey,
   type MembershipLifecycleStatus,
 } from "@/lib/memberships"
@@ -45,10 +45,11 @@ function serializeHistoryRows(
   todayKey: string
 ) {
   // Renewal rules are per-member, not per-record: every record in this member's
-  // history shares the same suggested start (the day after ALL their coverage)
-  // and the same coverage-through information.
+  // history shares the same suggested start (the day after ALL their coverage),
+  // the same coverage-through information, and the same "needs renewal" flag.
   const suggestedStart = nextValidRenewalStartKey(rows, timeZone, todayKey)
   const coverageThroughKey = getMemberCoverage(rows, timeZone, todayKey).overallEndKey
+  const canRenew = memberNeedsRenewal(rows, timeZone, todayKey)
   const today = new Date()
   return rows.map((m) => {
     const lifecycle = getMembershipLifecycle({
@@ -68,6 +69,7 @@ function serializeHistoryRows(
       daysLeft: lifecycle.daysLeft,
       suggestedStart,
       coverageThroughKey,
+      canRenew,
       renewedThrough:
         coverageThroughKey != null &&
         coverageThroughKey > dayKeyInTimeZone(m.endDate, timeZone),
@@ -149,7 +151,6 @@ export default async function MembershipsPage({
   const stats = await getMembershipLifecycleStats(user.organizationId, timeZone)
 
   const entries = []
-  const today = new Date()
   for (const [memberId, rows] of rowsByMember) {
     const primary = pickPrimaryMembership(rows, timeZone)
     if (!primary || primary.row.memberId !== memberId) continue
@@ -167,18 +168,10 @@ export default async function MembershipsPage({
     // the day after the last coverage end even if that end already passed).
     const coverageThroughKey = primary.coverage.overallEndKey
     const suggestedStart = nextValidRenewalStartKey(rows, timeZone, todayKey)
-    const canRenew = rows.some(
-      (row) =>
-        canRenewLifecycle(
-          getMembershipLifecycle({
-            startDate: row.startDate,
-            endDate: row.endDate,
-            status: row.status,
-            timeZone,
-            today,
-          }).status
-        )
-    )
+    // Renew is a MEMBER-LEVEL decision based on total coverage — never driven
+    // by a single record's expiry (a historical record may read EXPIRED while
+    // the member's coverage chain continues into the future).
+    const canRenew = memberNeedsRenewal(rows, timeZone, todayKey)
 
     entries.push({
       id: primary.row.id,

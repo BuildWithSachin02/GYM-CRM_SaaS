@@ -8,12 +8,11 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import {
-  MINOR_PER_RUPEE,
   exactMoney,
   formatTick,
-  niceAxis,
-  type AxisSpec,
+  moneyAxisFromMinor,
 } from "@/lib/chart-axis"
+import { minorToRupees } from "@/lib/format"
 
 const config = {
   revenue: {
@@ -29,19 +28,19 @@ type RevenueTrendChartProps = {
 /**
  * Revenue trend area chart.
  *
- * NOTE ON UNITS: `revenue` is stored as integer minor units (paise). The chart
- * normalizes to RUPEES once, at the boundary, and everything drawn (axis,
- * tooltip) works in rupees. There is intentionally no paise↔rupee conversion
- * inside the render pipeline — see the getRevenueAnalysis contract.
+ * UNIT RULE: `revenue` is stored as integer minor units (paise). The chart
+ * converts to RUPEES exactly once, at the boundary (plotData), and everything
+ * drawn — area geometry, axis, tooltip — works in rupees. A raw paise value is
+ * never plotted against a rupee axis.
  */
 export function RevenueTrendChart({ data }: RevenueTrendChartProps) {
-  const toRupees = (minor: number) => minor / MINOR_PER_RUPEE
-  const maxRupees = data.reduce((acc, d) => Math.max(acc, toRupees(d.revenue)), 0)
-  const axis: AxisSpec = niceAxis(maxRupees, 4, false)
+  const maxMinor = data.reduce((acc, d) => Math.max(acc, d.revenue), 0)
+  const axis = moneyAxisFromMinor(maxMinor)
+  const plotData = data.map((d) => ({ day: d.day, revenue: minorToRupees(d.revenue) }))
 
   return (
     <ChartContainer config={config} className="h-56 w-full">
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <AreaChart data={plotData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="fillRevenue" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.35} />
@@ -71,7 +70,14 @@ export function RevenueTrendChart({ data }: RevenueTrendChartProps) {
           cursor={false}
           content={
             <ChartTooltipContent
-              formatter={(value) => [exactMoney(toRupees(Number(value))), "Revenue"]}
+              formatter={(value) => (
+                <>
+                  <span className="font-mono font-medium text-foreground tabular-nums">
+                    {exactMoney(Number(value))}
+                  </span>
+                  <span className="text-muted-foreground">Revenue</span>
+                </>
+              )}
               indicator="dot"
             />
           }

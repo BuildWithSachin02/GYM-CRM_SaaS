@@ -5,9 +5,12 @@ import { dayKeyInTimeZone } from "@/lib/memberships"
 import {
   attributeMinorByDay,
   buildTrendSeries,
+  filterRecordedPayments,
+  rangeKeysBetween,
   rangeKeysEndingAt,
   revenueEnvelope,
   sumByDay,
+  type DayKeyRange,
   type RevenueMetric,
   type TrendPoint,
 } from "@/lib/analytics-core"
@@ -30,7 +33,7 @@ export * from "@/lib/analytics-core"
 export async function getRevenueAnalysis(
   organizationId: string,
   timeZone: string,
-  days: number
+  range: number | DayKeyRange
 ): Promise<{
   todayKey: string
   keys: string[]
@@ -41,11 +44,14 @@ export async function getRevenueAnalysis(
   byPlan: { planName: string; amountMinor: number; count: number }[]
 }> {
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
-  const keys = rangeKeysEndingAt(todayKey, days)
+  const keys =
+    typeof range === "number"
+      ? rangeKeysEndingAt(todayKey, range)
+      : rangeKeysBetween(range.fromKey, range.toKey)
   const keySet = new Set(keys)
   const { gte, lte } = revenueEnvelope(keys)
 
-  const rows = await prisma.payment.findMany({
+  const fetched = await prisma.payment.findMany({
     where: {
       organizationId,
       status: "RECORDED",
@@ -60,6 +66,8 @@ export async function getRevenueAnalysis(
       paymentDate: true,
     },
   })
+
+  const rows = filterRecordedPayments(fetched)
 
   const byDay = attributeMinorByDay(rows, timeZone)
   const totalMinor = sumByDay(byDay, keys)
@@ -113,14 +121,17 @@ export async function getRevenueAnalysis(
   }
 }
 
-/** Attendance trend in org-timezone days: `days` calendar-day buckets ending today. */
+/** Attendance trend in org-timezone days: `days` calendar-day buckets ending today, or an explicit inclusive day-key range. */
 export async function getAttendanceTrendByDay(
   organizationId: string,
   timeZone: string,
-  days: number
+  range: number | DayKeyRange
 ): Promise<TrendPoint[]> {
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
-  const keys = rangeKeysEndingAt(todayKey, days)
+  const keys =
+    typeof range === "number"
+      ? rangeKeysEndingAt(todayKey, range)
+      : rangeKeysBetween(range.fromKey, range.toKey)
   const rows = await prisma.checkIn.groupBy({
     by: ["dayKey"],
     where: { organizationId, dayKey: { in: keys } },

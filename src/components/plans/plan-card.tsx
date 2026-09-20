@@ -1,8 +1,9 @@
 "use client"
 
 import { useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, ArchiveRestore, Pencil } from "lucide-react"
+import { Archive, ArchiveRestore, Pencil, Users } from "lucide-react"
 import { toast } from "sonner"
 
 import type { PlanInterval } from "@prisma/client"
@@ -32,7 +33,8 @@ type SerializedPlan = {
   description: string | null
   active: boolean
   updatedAt: string
-  _count: { memberships: number }
+  /** Distinct members with a non-cancelled membership on this plan. */
+  memberCount: number
 }
 
 export function PlanCard({ plan, canManage }: { plan: SerializedPlan; canManage: boolean }) {
@@ -87,14 +89,23 @@ export function PlanCard({ plan, canManage }: { plan: SerializedPlan; canManage:
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Members</span>
-          <span className="font-medium">{plan._count.memberships}</span>
+          <span className="font-medium">
+            {plan.memberCount} {pluralize(plan.memberCount, "member")}
+          </span>
         </div>
       </CardContent>
 
-      {canManage && (
-        <>
-          <Separator className="mx-0" />
-          <div className="flex items-center justify-end gap-2 p-(--card-spacing)">
+      <Separator className="mx-0" />
+      <div className="flex items-center justify-between gap-2 p-(--card-spacing)">
+        <Button
+          variant="ghost"
+          size="sm"
+          render={<Link href={`/dashboard/plans/${plan.id}/members`} />}
+        >
+          <Users className="size-3.5" /> View Members
+        </Button>
+        {canManage && (
+          <div className="flex items-center justify-end gap-2">
             <PlanForm
               plan={plan}
               trigger={
@@ -120,8 +131,8 @@ export function PlanCard({ plan, canManage }: { plan: SerializedPlan; canManage:
               )}
             </Button>
           </div>
-        </>
-      )}
+        )}
+      </div>
     </Card>
   )
 }

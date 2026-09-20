@@ -26,6 +26,71 @@ export function rangeKeysEndingAt(todayKey: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) => addDaysToKey(todayKey, i - (days - 1)))
 }
 
+/** All calendar-day keys from `fromKey` to `toKey` INCLUSIVE, oldest first. */
+export function rangeKeysBetween(fromKey: string, toKey: string): string[] {
+  if (fromKey > toKey) return []
+  const keys: string[] = []
+  let cursor = fromKey
+  while (cursor <= toKey) {
+    keys.push(cursor)
+    cursor = addDaysToKey(cursor, 1)
+  }
+  return keys
+}
+
+/**
+ * True for a well-formed, real calendar day key (YYYY-MM-DD). Rejects
+ * malformed strings ("2026-9-2"), impossible dates ("2026-13-01") and
+ * non-leap-day Feb 29s. Used to decide whether `?from=`/`?to=` query params
+ * are safe to report on before they are ever sent to a query.
+ */
+export function isDayKey(value: string | null | undefined): value is string {
+  if (!value) return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [y, m, d] = value.split("-").map(Number)
+  const probe = new Date(Date.UTC(y, m - 1, d))
+  return (
+    probe.getUTCFullYear() === y &&
+    probe.getUTCMonth() === m - 1 &&
+    probe.getUTCDate() === d
+  )
+}
+
+/** Report scope: the two presets, plus an explicit From/To day-key range. */
+export type ReportRange = "30" | "90" | "custom"
+
+/** An explicit inclusive report range expressed in org-timezone day keys. */
+export type DayKeyRange = { fromKey: string; toKey: string }
+
+/**
+ * Resolve the report scope from URL params into a concrete inclusive
+ * (fromKey, toKey) span in org-timezone day keys.
+ *
+ * Authority order:
+ *  1. `?from=` + `?to=` both valid and from <= to  -> "custom"
+ *  2. ?range=90                                    -> last 90 days (incl today)
+ *  3. anything else                                -> last 30 days (incl today)
+ *
+ * Invalid or partially-supplied custom params NEVER reach a query — they fall
+ * back to the preset so the page always renders a valid range.
+ */
+export function resolveReportRange(input: {
+  range?: string | null
+  from?: string | null
+  to?: string | null
+  todayKey: string
+}): DayKeyRange & { range: ReportRange } {
+  const { range, from, to, todayKey } = input
+
+  if (isDayKey(from) && isDayKey(to) && from <= to) {
+    return { range: "custom", fromKey: from, toKey: to }
+  }
+  if (range === "90") {
+    return { range: "90", fromKey: addDaysToKey(todayKey, -(90 - 1)), toKey: todayKey }
+  }
+  return { range: "30", fromKey: addDaysToKey(todayKey, -(30 - 1)), toKey: todayKey }
+}
+
 /**
  * Attribute records to org-timezone calendar days. This is the ONE place a
  * timestamp becomes a business day for revenue/attendance analytics, so every
@@ -48,6 +113,23 @@ export function sumByDay(byDay: Map<string, number>, keys: string[]): number {
   let total = 0
   for (const k of keys) total += byDay.get(k) ?? 0
   return total
+}
+
+/**
+ * Revenue source-of-truth rule: only RECORDED payments are money actually
+ * received. VOIDED/REFUNDED rows carry no revenue (a voided payment stays in
+ * the ledger for audit but never counts). Membership prices are never part of
+ * revenue — revenue is always derived from Payment rows only.
+ *
+ * `status` is optional so callers that already know the source can pass
+ * unlabelled rows; the analytics layer always labels rows before this filter.
+ */
+export function filterRecordedPayments<T>(
+  rows: (T & { status?: string | null })[]
+): T[] {
+  return rows.filter(
+    (r) => r.status == null || r.status === "" || r.status === "RECORDED"
+  )
 }
 
 // ---------------------------------------------------------------------------

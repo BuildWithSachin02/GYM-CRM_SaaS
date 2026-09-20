@@ -8,6 +8,8 @@ import {
   dayKeyInTimeZone,
   getMemberCoverage,
   getMembershipLifecycle,
+  memberNeedsRenewal,
+  nextValidRenewalStartKey,
   pickPrimaryMembership,
 } from "@/lib/memberships"
 
@@ -62,8 +64,10 @@ export default async function MemberDetailPage({ params }: PageProps) {
           startDate: true,
           endDate: true,
           status: true,
+          amountMinor: true,
           plan: {
             select: {
+              id: true,
               name: true,
               billingInterval: true,
               priceMinor: true,
@@ -73,16 +77,26 @@ export default async function MemberDetailPage({ params }: PageProps) {
         },
       },
       payments: {
+        where: { status: "RECORDED" },
         orderBy: { paymentDate: "desc" },
         take: 10,
         select: {
           id: true,
           amountMinor: true,
           method: true,
+          status: true,
           paymentDate: true,
           reference: true,
           notes: true,
           createdAt: true,
+          membership: {
+            select: {
+              id: true,
+              startDate: true,
+              endDate: true,
+              plan: { select: { name: true } },
+            },
+          },
           recordedBy: {
             select: { name: true },
           },
@@ -102,6 +116,12 @@ export default async function MemberDetailPage({ params }: PageProps) {
   const today = new Date()
   const todayKey = dayKeyInTimeZone(today, timeZone)
 
+  const plans = await prisma.membershipPlan.findMany({
+    where: { organizationId: user.organizationId, active: true },
+    orderBy: { priceMinor: "asc" },
+    select: { id: true, name: true, priceMinor: true, durationDays: true },
+  })
+
   const attendanceOverview = await getMemberAttendanceOverview(
     user.organizationId,
     member.id,
@@ -114,6 +134,35 @@ export default async function MemberDetailPage({ params }: PageProps) {
   const coverage = getMemberCoverage(member.memberships, timeZone, todayKey)
   const primary = pickPrimaryMembership(member.memberships, timeZone, today)
   const coverageThroughKey = coverage.overallEndKey
+
+  // Renewal is a genuine, server-computed action (not a copy of the list's
+  // "Renew" affordance): only when today is inside the renewal window or
+  // after expiry. When due, the profile opens the auto-dated renewal modal.
+  const needsRenewal = memberNeedsRenewal(member.memberships, timeZone, todayKey)
+  const suggestedStart = nextValidRenewalStartKey(
+    member.memberships,
+    timeZone,
+    todayKey
+  )
+  const renewalContext =
+    needsRenewal &&
+    primary &&
+    (primary.lifecycle.status === "EXPIRED" ||
+      primary.lifecycle.status === "EXPIRING_SOON")
+      ? {
+          membershipId: primary.row.id,
+          planId: primary.row.plan.id,
+          planName: primary.row.plan.name,
+          endDate: primary.row.endDate.toISOString(),
+          status: primary.lifecycle.status,
+          suggestedStart,
+          coverageThroughKey,
+          renewedThrough:
+            coverageThroughKey != null &&
+            coverageThroughKey >
+              dayKeyInTimeZone(primary.row.endDate, timeZone),
+        }
+      : null
 
   const serialized = {
     ...member,
@@ -147,6 +196,13 @@ export default async function MemberDetailPage({ params }: PageProps) {
       ...p,
       paymentDate: p.paymentDate.toISOString(),
       createdAt: p.createdAt.toISOString(),
+      membership: p.membership
+        ? {
+            ...p.membership,
+            startDate: p.membership.startDate.toISOString(),
+            endDate: p.membership.endDate.toISOString(),
+          }
+        : null,
     })),
     checkIns: attendanceOverview.recent,
     checkInCount: member._count.checkIns,
@@ -160,6 +216,10 @@ export default async function MemberDetailPage({ params }: PageProps) {
       canUpdate={can(user, "members:update")}
       canArchive={can(user, "members:archive")}
       canViewAttendance={can(user, "attendance:view")}
+      canManageMemberships={can(user, "memberships:manage")}
+      plans={plans}
+      todayKey={todayKey}
+      renewal={renewalContext}
     />
   )
 }

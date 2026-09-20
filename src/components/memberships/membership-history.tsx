@@ -35,6 +35,8 @@ type SerializedMembership = {
   coverageThroughKey: string | null
   /** True when this record's period is covered further by another record. */
   renewedThrough: boolean
+  /** Member-level "needs renewal now" flag (server decision from total coverage). */
+  canRenew: boolean
 }
 
 type MembershipHistoryProps = {
@@ -86,8 +88,7 @@ export function MembershipHistory({
           </TableHeader>
           <TableBody>
             {memberships.map((m, index) => {
-              const canRenew =
-                canManage && (m.status === "EXPIRED" || m.status === "EXPIRING_SOON")
+              const canRenew = canManage && m.canRenew
 
               return (
                 <TableRow key={m.id}>
@@ -100,11 +101,15 @@ export function MembershipHistory({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(m.endDate)}
-                    {m.renewedThrough && m.coverageThroughKey && (
-                      <span className="block text-xs text-muted-foreground">
-                        covered through {formatDayKey(m.coverageThroughKey)}
-                      </span>
-                    )}
+                    {(m.status === "ACTIVE" ||
+                      m.status === "EXPIRING_SOON" ||
+                      m.status === "UPCOMING") &&
+                      m.renewedThrough &&
+                      m.coverageThroughKey && (
+                        <span className="block text-xs text-muted-foreground">
+                          covered through {formatDayKey(m.coverageThroughKey)}
+                        </span>
+                      )}
                   </TableCell>
                   <TableCell>
                     <StatusBadge

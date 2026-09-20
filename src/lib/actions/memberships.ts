@@ -118,6 +118,10 @@ export async function createMembership(
         data: { status: "EXPIRED" },
       })
 
+      // A membership is the plan/price ASSIGNED to the member; it is NOT
+      // received revenue. No payment row is created here — actual money
+      // received is recorded separately via Record Payment (only RECORDED
+      // Payment rows contribute to revenue, never membership.amountMinor).
       const membership = await tx.membership.create({
         data: {
           organizationId: user.organizationId,
@@ -130,19 +134,6 @@ export async function createMembership(
           notes: data.notes ?? null,
         },
         select: { id: true },
-      })
-
-      await tx.payment.create({
-        data: {
-          organizationId: user.organizationId,
-          memberId: data.memberId,
-          membershipId: membership.id,
-          amountMinor: data.amountMinor,
-          method: data.method,
-          status: "RECORDED",
-          recordedById: user.id,
-          notes: data.notes ?? null,
-        },
       })
 
       return membership.id
@@ -341,19 +332,8 @@ export async function renewMembership(
         select: { id: true },
       })
 
-      await tx.payment.create({
-        data: {
-          organizationId: user.organizationId,
-          memberId: existing.memberId,
-          membershipId: created.id,
-          amountMinor: data.amountMinor,
-          method: data.method,
-          status: "RECORDED",
-          recordedById: user.id,
-          notes: data.notes ?? null,
-        },
-      })
-
+      // Renewal assigns the next period at the chosen plan price; it does not
+      // create revenue. Actual money received is recorded separately.
       return created.id
     })
 

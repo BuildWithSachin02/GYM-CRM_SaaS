@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Users, Plus, SearchIcon, Clock, XCircle, History } from "lucide-react"
@@ -147,6 +147,14 @@ export function MembershipList({
   const hasPrev = currentPage > 1
   const hasNext = currentPage < totalPages
 
+  // Current Memberships-list view (live filters) so a member profile opened
+  // from this list can return to the exact filters/pagination it left.
+  const listReturnTo = useMemo(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("member")
+    return `/dashboard/memberships?${params.toString()}`
+  }, [searchParams])
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -252,7 +260,7 @@ export function MembershipList({
                       </TableCell>
                       <TableCell>
                         <Link
-                          href={`/dashboard/members/${m.memberId}`}
+                          href={`/dashboard/members/${m.memberId}?returnTo=${encodeURIComponent(listReturnTo)}`}
                           className="font-medium hover:text-primary"
                         >
                           {m.memberName}
@@ -271,11 +279,15 @@ export function MembershipList({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {formatDate(m.endDate)}
-                        {m.renewedThrough && m.coverageThroughKey && (
-                          <span className="block text-xs text-muted-foreground">
-                            covered through {formatDayKey(m.coverageThroughKey)}
-                          </span>
-                        )}
+                        {(m.status === "ACTIVE" ||
+                          m.status === "EXPIRING_SOON" ||
+                          m.status === "UPCOMING") &&
+                          m.renewedThrough &&
+                          m.coverageThroughKey && (
+                            <span className="block text-xs text-muted-foreground">
+                              covered through {formatDayKey(m.coverageThroughKey)}
+                            </span>
+                          )}
                       </TableCell>
                       <TableCell>
                         <StatusBadge

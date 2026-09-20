@@ -8,10 +8,12 @@ import { z } from "zod"
 import { toast } from "sonner"
 
 import { renewMembership } from "@/lib/actions/memberships"
-import { formatDate, formatDayKey, formatMoney } from "@/lib/format"
+import { periodEndKey } from "@/lib/memberships"
+import { formatMoney } from "@/lib/format"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -31,13 +33,6 @@ import {
   FormMessage,
   FormServerError,
 } from "@/components/ui/form"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { EntityCombobox } from "@/components/ui/entity-combobox"
 
 const renewalFormSchema = z.object({
@@ -49,7 +44,6 @@ const renewalFormSchema = z.object({
     .min(1, "Enter an amount")
     .refine((v) => !Number.isNaN(Number(v)), "Enter a valid amount")
     .refine((v) => Number(v) > 0, "Amount must be positive"),
-  method: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER"]),
   notes: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
@@ -88,8 +82,6 @@ type RenewalFormProps = {
 export function RenewalForm({
   membership,
   suggestedStart,
-  coverageThroughKey,
-  renewedThrough,
   plans,
   trigger,
 }: RenewalFormProps) {
@@ -109,7 +101,6 @@ export function RenewalForm({
       planId: currentPlan?.id ?? "",
       startDate: suggestedStart,
       amount: currentPlan ? String(currentPlan.priceMinor / 100) : "",
-      method: "CASH",
       notes: "",
     },
   })
@@ -119,6 +110,15 @@ export function RenewalForm({
   const selectedPlan = useMemo(
     () => plans.find((p) => p.id === selectedPlanId) ?? null,
     [plans, selectedPlanId]
+  )
+
+  // The renewal period is never hand-typed: it starts the day after the
+  // member's existing coverage ends and lasts the SELECTED PLAN's own
+  // duration (periodEndKey mirrors what the server persists, so the preview
+  // here always matches the stored period).
+  const renewalEndKey = useMemo(
+    () => periodEndKey(suggestedStart, selectedPlan?.durationDays ?? 0),
+    [suggestedStart, selectedPlan]
   )
 
   const prevPlanIdRef = useRef<string | null>(currentPlan?.id ?? null)
@@ -136,15 +136,6 @@ export function RenewalForm({
       setServerError("Select a valid plan")
       return
     }
-    // Client-side mirror of the server gate: the start can never be earlier
-    // than the coverage-based suggestion, so the modal never opens in error.
-    if (data.startDate < suggestedStart) {
-      form.setError("startDate", {
-        type: "manual",
-        message: `Start date cannot be before ${formatDayKey(suggestedStart)}`,
-      })
-      return
-    }
     startTransition(async () => {
       const result = await renewMembership({
         membershipId: membership.id,
@@ -152,7 +143,6 @@ export function RenewalForm({
         startDate: data.startDate,
         durationDays: selectedPlan.durationDays,
         amountMinor: Math.round(Number(data.amount) * 100),
-        method: data.method,
         notes: data.notes || null,
       })
 
@@ -192,36 +182,15 @@ export function RenewalForm({
         <DialogHeader>
           <DialogTitle>Renew Membership</DialogTitle>
           <DialogDescription>
-            Renew membership for {membership.memberName}.
+            Renew membership for {membership.memberName}. Start and end dates
+            are calculated automatically. Payment is recorded separately when
+            you receive it.
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormServerError>{serverError}</FormServerError>
-
-            <p className="text-sm text-muted-foreground">
-              {renewedThrough && coverageThroughKey ? (
-                <>
-                  Your existing membership coverage runs until{" "}
-                  {formatDayKey(coverageThroughKey)}. This renewal will start from{" "}
-                  {formatDayKey(suggestedStart)} (the day after that coverage
-                  ends) unless you change the start date.
-                </>
-              ) : membership.status === "EXPIRED" ? (
-                <>
-                  Current membership ended {formatDate(membership.endDate)}. Earliest
-                  renewal date is {formatDayKey(suggestedStart)} unless you change
-                  the start date.
-                </>
-              ) : (
-                <>
-                  Current membership ends {formatDate(membership.endDate)}. Earliest
-                  renewal date is {formatDayKey(suggestedStart)} (back-to-back, no
-                  overlap) unless you change the start date.
-                </>
-              )}
-            </p>
 
             <FormField
               control={form.control}
@@ -253,63 +222,39 @@ export function RenewalForm({
                 name="startDate"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Start Date *</FormLabel>
+                    <FormLabel>Start Date</FormLabel>
                     <FormControl>
-                      <Input
-                        type="date"
-                        min={suggestedStart}
-                        {...field}
-                      />
+                      <Input type="date" readOnly {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Amount (₹) *</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="any"
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid gap-2">
+                <Label>End Date</Label>
+                <Input
+                  type="date"
+                  readOnly
+                  value={selectedPlan ? renewalEndKey : ""}
+                />
+              </div>
             </div>
 
             <FormField
               control={form.control}
-              name="method"
+              name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Payment Method *</FormLabel>
+                  <FormLabel>Plan price (₹) *</FormLabel>
                   <FormControl>
-                    <Select
-                      value={field.value}
-                      onValueChange={(val) =>
-                        field.onChange(val as RenewalFormValues["method"])
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CASH">Cash</SelectItem>
-                        <SelectItem value="UPI">UPI</SelectItem>
-                        <SelectItem value="CARD">Card</SelectItem>
-                        <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="any"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

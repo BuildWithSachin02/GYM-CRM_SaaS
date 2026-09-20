@@ -1,5 +1,6 @@
-/** Money is stored as integer minor units (paise) across the app. */
-export const MINOR_PER_RUPEE = 100
+/** Canonical money-to-rupees constant lives with the format helpers. */
+export { MINOR_PER_RUPEE } from "./format"
+import { minorToRupees, formatRupees } from "./format"
 
 /**
  * Deterministic chart axes derived from the ACTUAL data being plotted.
@@ -84,12 +85,18 @@ export function compactMoney(rupees: number): string {
 
 /** Exact currency value (tooltips only — never rounded/compacted). */
 export function exactMoney(rupees: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(rupees)
+  return formatRupees(rupees)
+}
+
+/**
+ * Deterministic MONEY chart axis derived from a paise maximum.
+ *
+ * The paise amount is converted to rupees once (the chart boundary) before the
+ * scale is built, so the axis domain and ticks are always rupee-scale — a raw
+ * paise value can never leak into the plot as if it were rupees.
+ */
+export function moneyAxisFromMinor(maxMinor: number, tickCount = 4): AxisSpec {
+  return niceAxis(minorToRupees(maxMinor), tickCount, false)
 }
 
 /** Tick label for a given axis unit (money rupees vs integer counts). */

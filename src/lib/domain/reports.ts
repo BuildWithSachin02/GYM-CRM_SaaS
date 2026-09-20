@@ -1,16 +1,27 @@
 import "server-only"
 
-import { endOfDay, startOfDay, subDays } from "date-fns"
-
 import { prisma } from "@/lib/prisma"
 import { LIFECYCLE_STATUS_ORDER } from "@/lib/memberships"
+import { addDaysToKey, utcInstantForKey } from "@/lib/memberships"
 import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
-import { getAttendanceTrendByDay, getRevenueAnalysis } from "@/lib/analytics"
+import {
+  getAttendanceTrendByDay,
+  getRevenueAnalysis,
+  type ReportRange,
+} from "@/lib/analytics"
 
-export type ReportRange = "30" | "90"
+export type { ReportRange } from "@/lib/analytics"
+
+export type ReportQuery = {
+  range: ReportRange
+  fromKey: string
+  toKey: string
+}
 
 export type ReportsData = {
   range: ReportRange
+  fromKey: string
+  toKey: string
   rangeStart: string
   rangeEnd: string
   kpis: {
@@ -32,42 +43,47 @@ export type ReportsData = {
 
 export async function getReportsData(
   organizationId: string,
-  range: ReportRange,
-  timeZone: string
+  timeZone: string,
+  query: ReportQuery
 ): Promise<ReportsData> {
-  const days = range === "90" ? 90 : 30
-  const now = new Date()
-  const rangeStart = startOfDay(subDays(now, days - 1))
-  const rangeEnd = endOfDay(now)
+  const { range, fromKey, toKey } = query
+
+  // Every section below runs over the SAME inclusive [fromKey, toKey] span, so
+  // the KPI, both trends and every breakdown reconcile by construction.
+
+  // Instant bounds are org-timezone local midnights: inclusive From 00:00 up
+  // to but not including 00:00 of the day after To (i.e. the whole To day).
+  // `lt` keeps the edge exact — a record at 23:59:59.999 on To still counts.
+  const rangeStart = utcInstantForKey(fromKey, timeZone)
+  const rangeEnd = utcInstantForKey(addDaysToKey(toKey, 1), timeZone)
 
   // Canonical revenue: one org-scoped, org-timezone attribution used by the
   // KPI, the trend and both revenue breakdowns — they reconcile by
   // construction (see getRevenueAnalysis).
-  const [revenueData, attendanceRange, memberGain, newLeads, conversions] =
+  const [revenueData, attendanceTrend, memberGain, newLeads, conversions] =
     await Promise.all([
-      getRevenueAnalysis(organizationId, timeZone, days),
-      getAttendanceTrendByDay(organizationId, timeZone, days),
+      getRevenueAnalysis(organizationId, timeZone, { fromKey, toKey }),
+      getAttendanceTrendByDay(organizationId, timeZone, { fromKey, toKey }),
       prisma.member.count({
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lte: rangeEnd } },
+        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
       }),
       prisma.lead.count({
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lte: rangeEnd } },
+        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
       }),
       prisma.lead.count({
         where: {
           organizationId,
           deletedAt: null,
-          convertedAt: { gte: rangeStart, lte: rangeEnd },
+          convertedAt: { gte: rangeStart, lt: rangeEnd },
         },
       }),
     ])
 
-  const [attendanceTrend, leadSources, membershipStatuses, appointmentStatuses] =
+  const [leadSources, membershipStatuses, appointmentStatuses] =
     await Promise.all([
-      getAttendanceTrendByDay(organizationId, timeZone, 14),
       prisma.lead.groupBy({
         by: ["source"],
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lte: rangeEnd } },
+        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
         _count: { _all: true },
       }),
       // Membership statuses are record-level and date-derived (UPCOMING /
@@ -85,6 +101,8 @@ export async function getReportsData(
 
   return {
     range,
+    fromKey,
+    toKey,
     rangeStart: rangeStart.toISOString(),
     rangeEnd: rangeEnd.toISOString(),
     kpis: {
@@ -93,7 +111,7 @@ export async function getReportsData(
       memberGain,
       newLeads,
       conversions,
-      attendanceCount: attendanceRange.reduce((acc, p) => acc + p.value, 0),
+      attendanceCount: attendanceTrend.reduce((acc, p) => acc + p.value, 0),
     },
     revenueTrend: revenueData.trend.map((t) => ({ day: t.label, revenue: t.value })),
     attendanceTrend: attendanceTrend.map((t) => ({ day: t.label, count: t.value })),

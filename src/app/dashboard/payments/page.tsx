@@ -88,6 +88,14 @@ export default async function PaymentsPage({
         member: {
           select: { id: true, firstName: true, lastName: true, phone: true },
         },
+        membership: {
+          select: {
+            id: true,
+            startDate: true,
+            endDate: true,
+            plan: { select: { name: true } },
+          },
+        },
         recordedBy: {
           select: { name: true },
         },
@@ -97,7 +105,24 @@ export default async function PaymentsPage({
     prisma.member.findMany({
       where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-      select: { id: true, firstName: true, lastName: true, phone: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        memberships: {
+          where: { status: { not: "CANCELLED" } },
+          orderBy: [{ endDate: "desc" }],
+          select: {
+            id: true,
+            startDate: true,
+            endDate: true,
+            amountMinor: true,
+            status: true,
+            plan: { select: { name: true, priceMinor: true } },
+          },
+        },
+      },
     }),
   ])
 
@@ -105,6 +130,22 @@ export default async function PaymentsPage({
     ...p,
     paymentDate: p.paymentDate.toISOString(),
     createdAt: p.createdAt.toISOString(),
+    membership: p.membership
+      ? {
+          ...p.membership,
+          startDate: p.membership.startDate.toISOString(),
+          endDate: p.membership.endDate.toISOString(),
+        }
+      : null,
+  }))
+
+  const serializedMembers = members.map((m) => ({
+    ...m,
+    memberships: m.memberships.map((ms) => ({
+      ...ms,
+      startDate: ms.startDate.toISOString(),
+      endDate: ms.endDate.toISOString(),
+    })),
   }))
 
   const totalPages = Math.ceil(totalCount / pageSize)
@@ -116,7 +157,7 @@ export default async function PaymentsPage({
       totalPages={totalPages}
       filters={{ q, method: methodFilter, from: fromDate, to: toDate, page }}
       canCreate={can(user, "payments:record")}
-      members={members}
+      members={serializedMembers}
     />
   )
 }

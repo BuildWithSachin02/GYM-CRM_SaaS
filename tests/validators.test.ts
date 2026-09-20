@@ -4,10 +4,12 @@ import assert from "node:assert/strict"
 import {
   appointmentSchema,
   appointmentStatusSchema,
+  leadConvertSchema,
   leadSchema,
   loginSchema,
   memberSchema,
   membershipCreateSchema,
+  membershipRenewSchema,
   orgSettingsSchema,
   paymentSchema,
   planSchema,
@@ -233,7 +235,6 @@ test("required date fields accept string and Date input and output Date", () => 
     startDate: "2026-09-10",
     durationDays: 30,
     amountMinor: 99900,
-    method: "CASH",
     notes: null,
   })
   assert.equal(stringInput.success, true)
@@ -247,7 +248,6 @@ test("required date fields accept string and Date input and output Date", () => 
     startDate: new Date("2026-09-10T00:00:00.000Z"),
     durationDays: 30,
     amountMinor: 99900,
-    method: "UPI",
     notes: null,
   })
   assert.equal(dateInput.success, true)
@@ -263,8 +263,51 @@ test("required date field rejects invalid and missing values", () => {
     startDate: "",
     durationDays: 30,
     amountMinor: 99900,
-    method: "CASH",
     notes: null,
   })
   assert.equal(res.success, false)
+})
+
+test("membership schemas carry price only — no payment method/date (no implicit payment)", () => {
+  // Assigning a membership must not be able to create revenue; the input
+  // contract therefore contains the agreed price but no payment fields.
+  const create = membershipCreateSchema.safeParse({
+    memberId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: "2026-09-10",
+    durationDays: 30,
+    amountMinor: 129900,
+  })
+  assert.equal(create.success, true)
+  if (create.success) {
+    assert.equal(create.data.amountMinor, 129900)
+    assert.equal("method" in create.data, false)
+    assert.equal("paymentDate" in create.data, false)
+  }
+
+  const renewal = membershipRenewSchema.safeParse({
+    membershipId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: "2026-09-21",
+    durationDays: 30,
+    amountMinor: 129900,
+  })
+  assert.equal(renewal.success, true)
+  if (renewal.success) {
+    assert.equal("method" in renewal.data, false)
+    assert.equal("paymentDate" in renewal.data, false)
+  }
+
+  const convert = leadConvertSchema.safeParse({
+    leadId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    planId: "e6f5a048-9294-45cb-b0cd-000000000002",
+    startDate: "2026-09-10T00:00:00.000Z",
+    durationDays: 30,
+    amountMinor: 129900,
+  })
+  assert.equal(convert.success, true)
+  if (convert.success) {
+    assert.equal("method" in convert.data, false)
+    assert.equal("paymentDate" in convert.data, false)
+  }
 })

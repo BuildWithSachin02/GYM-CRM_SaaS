@@ -78,7 +78,6 @@ type SerializedPlan = {
   description: string | null
   active: boolean
   updatedAt: string
-  _count: { memberships: number }
 }
 
 type PlanFormProps = {

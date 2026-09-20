@@ -34,7 +34,9 @@ import {
 import { RevenueTrendChart } from "@/components/charts/revenue-trend-chart"
 import { AttendanceTrendChart } from "@/components/charts/attendance-trend-chart"
 import { BreakdownChart } from "@/components/reports/breakdown-chart"
-import { formatMoney } from "@/lib/format"
+import { Input } from "@/components/ui/input"
+import { formatMoney, formatRangeLabel } from "@/lib/format"
+import { isDayKey } from "@/lib/analytics-core"
 import { LEAD_SOURCE, PAYMENT_METHOD, MEMBERSHIP_LIFECYCLE_STATUS, APPOINTMENT_STATUS } from "@/lib/status"
 import type { ReportsData } from "@/lib/domain/reports"
 
@@ -43,18 +45,14 @@ type ReportsPageProps = {
 }
 
 export function ReportsPage({ data }: ReportsPageProps) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
   const [tab, setTab] = useState("overview")
 
-  const setRange = (range: string) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set("range", range)
-    router.push(`/dashboard/reports?${params.toString()}`)
-  }
-
   const rangeLabel =
-    data.range === "90" ? "Last 90 days" : "Last 30 days"
+    data.range === "90"
+      ? "Last 90 days"
+      : data.range === "30"
+        ? "Last 30 days"
+        : formatRangeLabel(data.fromKey, data.toKey) || "Custom range"
 
   return (
     <div className="space-y-6">
@@ -62,22 +60,10 @@ export function ReportsPage({ data }: ReportsPageProps) {
         title="Reports"
         description={`Business insights · ${rangeLabel}`}
         actions={
-          <div className="flex items-center gap-1">
-            <Button
-              variant={data.range === "30" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setRange("30")}
-            >
-              30 days
-            </Button>
-            <Button
-              variant={data.range === "90" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setRange("90")}
-            >
-              90 days
-            </Button>
-          </div>
+          <RangeControl
+            key={`${data.range}:${data.fromKey}:${data.toKey}`}
+            data={data}
+          />
         }
       />
 
@@ -140,7 +126,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Attendance trend</CardTitle>
-                <CardDescription className="text-xs">Last 14 days</CardDescription>
+                <CardDescription className="text-xs">{rangeLabel}</CardDescription>
               </CardHeader>
               <CardContent>
                 <AttendanceTrendChart data={data.attendanceTrend} />
@@ -164,7 +150,6 @@ export function ReportsPage({ data }: ReportsPageProps) {
                   }))}
                   color="var(--primary)"
                   money
-                  formatter={(v) => formatMoney(v)}
                 />
               </CardContent>
             </Card>
@@ -184,7 +169,6 @@ export function ReportsPage({ data }: ReportsPageProps) {
                     }))}
                     color="var(--primary)"
                     money
-                    formatter={(v) => formatMoney(v)}
                   />
                 )}
               </CardContent>
@@ -303,7 +287,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Attendance trend</CardTitle>
-              <CardDescription className="text-xs">Last 14 days</CardDescription>
+              <CardDescription className="text-xs">{rangeLabel}</CardDescription>
             </CardHeader>
             <CardContent>
               <AttendanceTrendChart data={data.attendanceTrend} />
@@ -402,5 +386,123 @@ function EmptyChartNote({ children }: { children: React.ReactNode }) {
     <div className="flex h-56 items-center justify-center">
       <p className="text-center text-sm text-muted-foreground">{children}</p>
     </div>
+  )
+}
+
+/**
+ * Range selector + custom From/To filter. The range lives in the URL
+ * (?range=30|90|custom&from=YYYY-MM-DD&to=YYYY-MM-DD) so refresh, Back/Forward
+ * and tab switches all preserve the exact selection. Preset buttons navigate
+ * immediately; the custom range is committed only on Apply, and invalid dates
+ * are never sent to the URL.
+ */
+function RangeControl({ data }: { data: ReportsData }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  // State is keyed to the committed range by the caller (`key=`), so any real
+  // navigation (preset click, Apply, or Back/Forward) remounts this component
+  // with fresh drafts — no effect-needed prop-sync needed here.
+  const [open, setOpen] = useState(data.range === "custom")
+  const [from, setFrom] = useState(data.fromKey ?? "")
+  const [to, setTo] = useState(data.toKey ?? "")
+  const [error, setError] = useState<string | null>(null)
+
+  const go = (range: string, fromKey?: string, toKey?: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("range", range)
+    if (fromKey && toKey) {
+      params.set("from", fromKey)
+      params.set("to", toKey)
+    } else {
+      params.delete("from")
+      params.delete("to")
+    }
+    router.push(`/dashboard/reports?${params.toString()}`)
+  }
+
+  const applyCustom = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!from || !to) {
+      setError(!from ? "From date is required." : "To date is required.")
+      return
+    }
+    if (!isDayKey(from) || !isDayKey(to)) {
+      setError("Enter valid From and To dates.")
+      return
+    }
+    if (from > to) {
+      setError("From date must be before or equal to To date.")
+      return
+    }
+    setError(null)
+    go("custom", from, to)
+  }
+
+  return (
+    <form onSubmit={applyCustom} className="flex flex-col items-end gap-2">
+      <div className="flex flex-wrap items-center gap-1">
+        <Button
+          type="button"
+          variant={data.range === "30" ? "default" : "outline"}
+          size="sm"
+          onClick={() => go("30")}
+        >
+          30 days
+        </Button>
+        <Button
+          type="button"
+          variant={data.range === "90" ? "default" : "outline"}
+          size="sm"
+          onClick={() => go("90")}
+        >
+          90 days
+        </Button>
+        <Button
+          type="button"
+          variant={data.range === "custom" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setOpen((o) => !o)}
+        >
+          Custom
+        </Button>
+      </div>
+
+      {open && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            aria-label="From date"
+            value={from}
+            onChange={(e) => {
+              setError(null)
+              setFrom(e.target.value)
+            }}
+            className="h-7 w-36"
+          />
+          <Input
+            type="date"
+            aria-label="To date"
+            value={to}
+            onChange={(e) => {
+              setError(null)
+              setTo(e.target.value)
+            }}
+            className="h-7 w-36"
+          />
+          <Button type="submit" size="sm">
+            Apply
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => go("30")}>
+            Reset
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <p role="alert" className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      )}
+    </form>
   )
 }

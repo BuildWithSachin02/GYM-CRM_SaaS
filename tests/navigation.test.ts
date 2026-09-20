@@ -3,7 +3,9 @@ import assert from "node:assert/strict"
 
 import {
   activeNavItemHref,
+  getSafeReturnPath,
   isNavRouteActive,
+  isSafeDashboardPath,
 } from "../src/lib/navigation"
 
 // ---------------------------------------------------------------------------
@@ -86,4 +88,57 @@ test("unknown routes leave nothing active", () => {
 
   assert.equal(activeNavItemHref(items, "/dashboard/notifications"), null)
   assert.equal(activeNavItemHref(items, "/login"), null)
+})
+
+// ---------------------------------------------------------------------------
+// Safe return-path handling (Requirement 4/5): detail pages may only link back
+// through validated internal dashboard paths — never raw ?returnTo= input.
+// ---------------------------------------------------------------------------
+test("isSafeDashboardPath accepts only internal dashboard paths", () => {
+  assert.equal(isSafeDashboardPath("/dashboard"), true)
+  assert.equal(isSafeDashboardPath("/dashboard/members"), true)
+  assert.equal(
+    isSafeDashboardPath("/dashboard/plans/123/members?x=1&y=2"),
+    true
+  )
+  assert.equal(isSafeDashboardPath("/dashboard/memberships?status=EXPIRED"), true)
+})
+
+test("isSafeDashboardPath rejects external, scheme-less and out-of-app paths", () => {
+  assert.equal(isSafeDashboardPath(""), false)
+  assert.equal(isSafeDashboardPath("https://evil.com"), false)
+  assert.equal(isSafeDashboardPath("http://evil.com"), false)
+  assert.equal(isSafeDashboardPath("//evil.com"), false)
+  assert.equal(isSafeDashboardPath("javascript:alert(1)"), false)
+  assert.equal(isSafeDashboardPath("/\\evil.com"), false)
+  assert.equal(isSafeDashboardPath("/logout"), false)
+  assert.equal(isSafeDashboardPath("/"), false)
+  assert.equal(isSafeDashboardPath("dashboard/members"), false)
+})
+
+test("getSafeReturnPath decodes encoded query values and falls back otherwise", () => {
+  const fallback = "/dashboard/members"
+  assert.equal(
+    getSafeReturnPath("/dashboard", fallback),
+    "/dashboard"
+  )
+  assert.equal(
+    getSafeReturnPath(
+      encodeURIComponent("/dashboard/memberships?status=EXPIRED&page=2"),
+      fallback
+    ),
+    "/dashboard/memberships?status=EXPIRED&page=2"
+  )
+  assert.equal(getSafeReturnPath("%zz", fallback), fallback)
+  assert.equal(getSafeReturnPath(encodeURIComponent("https://evil.com"), fallback), fallback)
+  assert.equal(getSafeReturnPath(encodeURIComponent("//evil.com"), fallback), fallback)
+  assert.equal(getSafeReturnPath("", fallback), fallback)
+  assert.equal(getSafeReturnPath(null, fallback), fallback)
+  assert.equal(getSafeReturnPath(undefined, fallback), fallback)
+})
+
+test("getSafeReturnPath rejects control characters even when decodable", () => {
+  const fallback = "/dashboard/members"
+  assert.equal(getSafeReturnPath("/dashboard/\u0000", fallback), fallback)
+  assert.equal(getSafeReturnPath("/dashboard/\n", fallback), fallback)
 })

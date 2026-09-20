@@ -306,7 +306,7 @@ export async function convertLeadToMember(
       select: { id: true },
     })
 
-    const membership = await tx.membership.create({
+    await tx.membership.create({
       data: {
         organizationId: user.organizationId,
         memberId: member.id,
@@ -316,21 +316,10 @@ export async function convertLeadToMember(
         amountMinor: data.amountMinor,
         status: "ACTIVE",
       },
-      select: { id: true },
     })
 
-    await tx.payment.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: member.id,
-        membershipId: membership.id,
-        amountMinor: data.amountMinor,
-        method: data.method,
-        status: "RECORDED",
-        paymentDate: new Date(),
-        recordedById: user.id,
-      },
-    })
+    // Conversion assigns a membership only — it creates no revenue. Actual
+    // money received is recorded separately via Record Payment.
 
     await tx.lead.update({
       where: { id: data.leadId },
