@@ -1,5 +1,11 @@
 import { z } from "zod"
 
+import { isDayKey } from "@/lib/analytics-core"
+import {
+  DATA_CATEGORY_ORDER,
+  RESET_SELECTABLE_CATEGORIES,
+} from "@/lib/data-catalog"
+
 const requiredText = (min = 1, max = 200) =>
   z.string().trim().min(min, "Required").max(max, `Max ${max} characters`)
 
@@ -307,6 +313,58 @@ export const qrSessionSchema = z.object({
 })
 
 export type QrSessionInput = z.infer<typeof qrSessionSchema>
+
+// ---------------------------------------------------------------------------
+
+/**
+ * A valid, real calendar day key (YYYY-MM-DD) for the org-timezone date
+ * filters. Rejects malformed and impossible dates before they hit a query.
+ */
+const dayKey = () =>
+  z
+    .string()
+    .refine(isDayKey, "Enter a valid date (YYYY-MM-DD)")
+
+const dataDateRangeSchema = z
+  .discriminatedUnion("mode", [
+    z.object({ mode: z.literal("all") }),
+    z.object({
+      mode: z.literal("custom"),
+      fromKey: dayKey(),
+      toKey: dayKey(),
+    }),
+  ])
+  .refine(
+    (range) => range.mode !== "custom" || range.fromKey <= range.toKey,
+    { message: "From date must be before or equal to To date" }
+  )
+
+export type DataDateRangeInput = z.infer<typeof dataDateRangeSchema>
+
+export const dataExportSchema = z.object({
+  categories: z
+    .array(z.enum(DATA_CATEGORY_ORDER))
+    .min(1, "Select at least one data category"),
+  dateRange: dataDateRangeSchema,
+})
+
+export type DataExportInput = z.input<typeof dataExportSchema>
+
+export const dataResetPreviewSchema = z.object({
+  categories: z
+    .array(z.enum(RESET_SELECTABLE_CATEGORIES))
+    .min(1, "Select at least one data category"),
+  dateRange: dataDateRangeSchema,
+})
+
+export type DataResetPreviewInput = z.input<typeof dataResetPreviewSchema>
+
+export const dataResetExecuteSchema = dataResetPreviewSchema.extend({
+  confirmPhrase: z.string().min(1, "Type the confirmation phrase"),
+  password: z.string().min(1, "Enter your password"),
+})
+
+export type DataResetExecuteInput = z.input<typeof dataResetExecuteSchema>
 
 // ---------------------------------------------------------------------------
 

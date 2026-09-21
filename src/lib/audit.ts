@@ -60,4 +60,6 @@ export const AUDIT_ACTIONS = {
   CHECKIN_QR: "attendance.qr",
   QR_SESSION_CREATED: "qrsession.created",
   ORG_UPDATED: "organization.updated",
+  DATA_EXPORTED: "data.exported",
+  DATA_RESET: "data.reset",
 } as const

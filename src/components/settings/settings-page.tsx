@@ -18,6 +18,7 @@ import { initials, formatDate } from "@/lib/format"
 import { OrgForm } from "@/components/settings/org-form"
 import { StaffForm } from "@/components/settings/staff-form"
 import { StaffEditForm } from "@/components/settings/staff-edit-form"
+import { DataSettings } from "@/components/settings/data-settings"
 
 export type OrgData = {
   id: string
@@ -74,6 +75,7 @@ export function SettingsPage({
         <TabsList>
           <TabsTrigger value="gym">Gym Details</TabsTrigger>
           <TabsTrigger value="staff">Staff</TabsTrigger>
+          {canManageSettings && <TabsTrigger value="data">Data</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="gym" className="mt-4">
@@ -191,6 +193,12 @@ export function SettingsPage({
             </CardContent>
           </Card>
         </TabsContent>
+
+        {canManageSettings && (
+          <TabsContent value="data" className="mt-4">
+            {org ? <DataSettings gymName={org.name} /> : null}
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )
