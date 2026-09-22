@@ -1,3 +1,4 @@
+![Uploading diagram.png…]()
 # 🏋️ Gym CRM
 
 > **A production-grade, multi-tenant Gym Management & CRM platform built for modern fitness businesses.**
