@@ -12,6 +12,7 @@ import {
   nextValidRenewalStartKey,
   pickPrimaryMembership,
 } from "@/lib/memberships"
+import { deriveOutstandingStatus, isOutstandingTrackedStatus } from "@/lib/outstanding"
 
 import { MemberProfile } from "@/components/members/member-profile"
 import { getMemberAttendanceOverview } from "@/lib/domain/member-attendance"
@@ -65,6 +66,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
           endDate: true,
           status: true,
           amountMinor: true,
+          expectedPaymentDate: true,
           plan: {
             select: {
               id: true,
@@ -128,6 +130,29 @@ export default async function MemberDetailPage({ params }: PageProps) {
     timeZone
   )
 
+  // RECORDED-only sums per membership so the profile can show what is paid and
+  // what is still owed (the same rule as the outstanding ledger — VOIDED and
+  // REFUNDED never count).
+  const recordedByMembership = await prisma.payment.groupBy({
+    by: ["membershipId"],
+    where: {
+      organizationId: user.organizationId,
+      memberId: member.id,
+      status: "RECORDED",
+      membershipId: { not: null },
+    },
+    _sum: { amountMinor: true },
+  })
+  const paidByMembership = new Map(
+    recordedByMembership
+      .filter((r) => r.membershipId)
+      .map((r) => [r.membershipId as string, r._sum.amountMinor ?? 0])
+  )
+  const totalPaidMinor = recordedByMembership.reduce(
+    (sum, r) => sum + (r._sum.amountMinor ?? 0),
+    0
+  )
+
   // Member-level coverage: the summary badge/labels come from the union of
   // every valid period (the same rule as the memberships list), so a record
   // that ended but is chained to future coverage never reads "expiring".
@@ -176,10 +201,25 @@ export default async function MemberDetailPage({ params }: PageProps) {
         status: m.status,
         timeZone,
       })
+      const paidMinor = paidByMembership.get(m.id) ?? 0
+      const outstandingMinor = m.amountMinor - paidMinor
       return {
         ...m,
         startDate: m.startDate.toISOString(),
         endDate: m.endDate.toISOString(),
+        expectedPaymentDate: m.expectedPaymentDate?.toISOString() ?? null,
+        paidMinor,
+        outstandingMinor,
+        // Derived (never stored); CANCELLED memberships can't be paid into so
+        // they carry no balance status on the profile.
+        outstandingStatus: isOutstandingTrackedStatus(m.status)
+          ? deriveOutstandingStatus({
+              outstandingMinor,
+              expectedPaymentDate: m.expectedPaymentDate,
+              timeZone,
+              today,
+            })
+          : null,
         status: lifecycle.status,
         daysLeft: lifecycle.daysLeft,
         daysUntilStart: lifecycle.daysUntilStart,
@@ -206,6 +246,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
     })),
     checkIns: attendanceOverview.recent,
     checkInCount: member._count.checkIns,
+    totalPaidMinor,
   }
 
   return (
@@ -217,6 +258,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
       canArchive={can(user, "members:archive")}
       canViewAttendance={can(user, "attendance:view")}
       canManageMemberships={can(user, "memberships:manage")}
+      canRecordPayment={can(user, "payments:record")}
       plans={plans}
       todayKey={todayKey}
       renewal={renewalContext}

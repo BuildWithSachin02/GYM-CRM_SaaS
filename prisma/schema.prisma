@@ -273,6 +273,11 @@ model Member {
   signupSource          LeadSource?
   status                MemberStatus @default(ACTIVE)
   notes                 String?
+  // Optional bcrypt hash of the member's numeric check-in PIN (QR attendance).
+  // Never stored in plain text, never encoded in a QR, never included in
+  // attendance records. Members authenticate with phone + PIN on the QR page;
+  // the server derives their identity from the resulting signed session.
+  pinHash               String?
   deletedAt             DateTime?
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
@@ -334,6 +339,10 @@ model Membership {
   endDate             DateTime
   amountMinor         Int
   notes               String?
+  // The org-local commitment day the owner expects this membership to be
+  // paid in full by. NEVER revenue: it only drives the derived PENDING/OVERDUE
+  // outstanding status. Money is always the RECORDED payment rows.
+  expectedPaymentDate DateTime?
   renewsAutomatically Boolean          @default(false)
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt

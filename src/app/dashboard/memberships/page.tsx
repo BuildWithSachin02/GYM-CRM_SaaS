@@ -39,10 +39,13 @@ function serializeHistoryRows(
     startDate: Date
     endDate: Date
     status: string
+    amountMinor: number
+    expectedPaymentDate: Date | null
     plan: { id: string; name: string }
   }>,
   timeZone: string,
-  todayKey: string
+  todayKey: string,
+  paidByMembership: Map<string, number>
 ) {
   // Renewal rules are per-member, not per-record: every record in this member's
   // history shares the same suggested start (the day after ALL their coverage),
@@ -59,6 +62,7 @@ function serializeHistoryRows(
       timeZone,
       today,
     })
+    const paidMinor = paidByMembership.get(m.id) ?? 0
     return {
       id: m.id,
       planId: m.plan.id,
@@ -73,6 +77,10 @@ function serializeHistoryRows(
       renewedThrough:
         coverageThroughKey != null &&
         coverageThroughKey > dayKeyInTimeZone(m.endDate, timeZone),
+      amountMinor: m.amountMinor,
+      paidMinor,
+      outstandingMinor: m.amountMinor - paidMinor,
+      expectedPaymentDate: m.expectedPaymentDate?.toISOString() ?? null,
     }
   })
 }
@@ -98,6 +106,23 @@ export default async function MembershipsPage({
     select: { id: true, name: true, priceMinor: true, durationDays: true },
   })
 
+  // RECORDED-only sums per membership so the list/history can show what is
+  // paid and what is still pending (VOIDED/REFUNDED never count).
+  const recordedByMembership = await prisma.payment.groupBy({
+    by: ["membershipId"],
+    where: {
+      organizationId: user.organizationId,
+      status: "RECORDED",
+      membershipId: { not: null },
+    },
+    _sum: { amountMinor: true },
+  })
+  const paidByMembership = new Map(
+    recordedByMembership
+      .filter((r) => r.membershipId)
+      .map((r) => [r.membershipId as string, r._sum.amountMinor ?? 0])
+  )
+
   const memberFilter = params.member?.trim()
   if (memberFilter) {
     const target = UUID_RE.test(memberFilter)
@@ -114,7 +139,9 @@ export default async function MembershipsPage({
 
     const rows = await prisma.membership.findMany({
       where: { organizationId: user.organizationId, memberId: target.id },
-      include: { plan: { select: { id: true, name: true } } },
+      include: {
+        plan: { select: { id: true, name: true } },
+      },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { createdAt: "desc" }],
     })
 
@@ -122,7 +149,7 @@ export default async function MembershipsPage({
       <MembershipHistory
         memberId={target.id}
         memberName={`${target.firstName} ${target.lastName}`.trim()}
-        memberships={serializeHistoryRows(rows, timeZone, todayKey)}
+        memberships={serializeHistoryRows(rows, timeZone, todayKey, paidByMembership)}
         plans={plans}
         canManage={canManage}
       />
@@ -173,6 +200,8 @@ export default async function MembershipsPage({
     // the member's coverage chain continues into the future).
     const canRenew = memberNeedsRenewal(rows, timeZone, todayKey)
 
+    const paidMinor = paidByMembership.get(primary.row.id) ?? 0
+
     entries.push({
       id: primary.row.id,
       memberId,
@@ -190,6 +219,10 @@ export default async function MembershipsPage({
         coverageThroughKey != null &&
         coverageThroughKey > dayKeyInTimeZone(primary.row.endDate, timeZone),
       canRenew,
+      amountMinor: primary.row.amountMinor,
+      paidMinor,
+      outstandingMinor: primary.row.amountMinor - paidMinor,
+      expectedPaymentDate: primary.row.expectedPaymentDate?.toISOString() ?? null,
     })
   }
 

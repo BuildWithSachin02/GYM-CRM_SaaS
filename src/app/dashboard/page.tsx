@@ -19,6 +19,8 @@ import {
   HomeActivitySkeleton,
   HomeCardsSkeleton,
   HomeChartsSkeleton,
+  HomeDuesSection,
+  HomeDuesSkeleton,
   HomeRemainingSection,
   HomeStatsSection,
   HomeStatsSkeleton,
@@ -68,6 +70,13 @@ export default async function DashboardPage() {
 
       <Suspense fallback={<HomeCardsSkeleton />}>
         <HomeRemainingSection
+          organizationId={user.organizationId}
+          timeZone={user.organization.timezone}
+        />
+      </Suspense>
+
+      <Suspense fallback={<HomeDuesSkeleton />}>
+        <HomeDuesSection
           organizationId={user.organizationId}
           timeZone={user.organization.timezone}
         />

@@ -19,7 +19,8 @@ import {
   getDashboardTrendsData,
   getDashboardUpcomingAppointments,
 } from "@/lib/domain/dashboard"
-import { formatDateTime, formatMoney, formatTime, pluralize } from "@/lib/format"
+import { getOutstandingDuesRows, getOutstandingOverview } from "@/lib/domain/outstanding"
+import { formatDate, formatDateTime, formatMoney, formatTime, pluralize } from "@/lib/format"
 import { APPOINTMENT_STATUS, LEAD_STAGE, MEMBER_STATUS, PAYMENT_METHOD } from "@/lib/status"
 
 import {
@@ -292,6 +293,117 @@ export async function HomeRemainingSection({
 }
 
 /**
+ * Streamed segment: outstanding/pending dues — balances from recorded
+ * payments, presented separately from Today's Revenue so a balance is never
+ * mistaken for money already collected.
+ */
+export async function HomeDuesSection({
+  organizationId,
+  timeZone,
+}: {
+  organizationId: string
+  timeZone: string
+}) {
+  const [overview, rows] = await Promise.all([
+    getOutstandingOverview(organizationId, timeZone),
+    getOutstandingDuesRows(organizationId, timeZone),
+  ])
+
+  const overdue = rows.filter((r) => r.status === "OVERDUE").slice(0, 5)
+  const pending = rows.filter((r) => r.status === "PENDING").slice(0, 4)
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <WidgetCard
+        title="Overdue dues"
+        description={`${overview.overdueCount} memberships overdue · ${formatMoney(overview.overdueMinor)}`}
+        href="/dashboard/payments?dueStatus=OVERDUE"
+        className="lg:col-span-2"
+      >
+        {overdue.length === 0 ? (
+          <EmptyRow>No overdue dues. Everyone is on track.</EmptyRow>
+        ) : (
+          <ul className="divide-y">
+            {overdue.map((r) => (
+              <li key={r.membershipId} className="flex items-center justify-between gap-2 py-2">
+                <div className="min-w-0">
+                  <Link
+                    href={`/dashboard/members/${r.memberId}`}
+                    className="block truncate text-sm font-medium hover:text-primary"
+                  >
+                    {r.memberName}
+                  </Link>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {r.planName}
+                    {r.expectedPaymentKey && ` · due ${formatDate(r.expectedPaymentKey)}`} ·{" "}
+                    <span className="text-red-600 dark:text-red-400">
+                      {r.daysOverdue}d overdue
+                    </span>
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-red-600 tabular-nums dark:text-red-400">
+                  {formatMoney(r.outstandingMinor)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </WidgetCard>
+
+      <WidgetCard
+        title="Pending dues"
+        description={`${overview.pendingCount} memberships pending`}
+        href="/dashboard/payments?dueStatus=PENDING"
+      >
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div className="rounded-lg border bg-muted/40 p-2">
+            <p className="text-xs text-muted-foreground">Total outstanding</p>
+            <p className="text-lg font-semibold tabular-nums">
+              {formatMoney(overview.totalOutstandingMinor)}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-amber-500/10 p-2">
+            <p className="text-xs text-amber-600 dark:text-amber-400">Pending</p>
+            <p className="text-lg font-semibold tabular-nums">
+              {formatMoney(overview.pendingMinor)}
+            </p>
+          </div>
+        </div>
+        {pending.length === 0 ? (
+          <div className="pt-3">
+            <EmptyRow>No pending dues.</EmptyRow>
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {pending.map((r) => (
+              <li key={r.membershipId} className="flex items-center justify-between gap-2 py-2">
+                <div className="min-w-0">
+                  <Link
+                    href={`/dashboard/members/${r.memberId}`}
+                    className="block truncate text-sm font-medium hover:text-primary"
+                  >
+                    {r.memberName}
+                  </Link>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {r.planName}
+                    {r.expectedPaymentKey
+                      ? ` · due ${formatDate(r.expectedPaymentKey)}`
+                      : " · no due date"}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-amber-600 tabular-nums dark:text-amber-400">
+                  {formatMoney(r.outstandingMinor)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </WidgetCard>
+    </div>
+  )
+}
+
+/**
  * Streamed segment: recent payments, leads to follow up, lead pipeline,
  * recently added members, and upcoming appointments.
  */
@@ -506,6 +618,21 @@ export function HomeCardsSkeleton() {
           <Skeleton className="mt-2 h-4 w-2/3" />
         </div>
       ))}
+    </div>
+  )
+}
+
+export function HomeDuesSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="rounded-xl border p-5 lg:col-span-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="mt-4 h-24" />
+      </div>
+      <div className="rounded-xl border p-5">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="mt-4 h-24" />
+      </div>
     </div>
   )
 }

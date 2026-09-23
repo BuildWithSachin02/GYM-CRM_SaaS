@@ -25,6 +25,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -56,6 +57,7 @@ const paymentFormSchema = z.object({
   paymentDate: z.string().min(1, "Select a date"),
   reference: z.string().trim().max(120).optional().or(z.literal("")),
   notes: z.string().trim().max(500).optional().or(z.literal("")),
+  expectedPaymentDate: z.string().optional().or(z.literal("")),
 })
 
 type PaymentFormValues = z.infer<typeof paymentFormSchema>
@@ -66,6 +68,9 @@ type MemberMembership = {
   endDate: string
   amountMinor: number
   status: string
+  expectedPaymentDate: string | null
+  paidMinor: number
+  outstandingMinor: number
   plan: { name: string; priceMinor: number }
 }
 
@@ -80,9 +85,16 @@ type MemberOption = {
 type PaymentFormProps = {
   members: MemberOption[]
   trigger?: React.ReactNode
+  defaultMemberId?: string
+  defaultMembershipId?: string
 }
 
-export function PaymentForm({ members, trigger }: PaymentFormProps) {
+export function PaymentForm({
+  members,
+  trigger,
+  defaultMemberId,
+  defaultMembershipId,
+}: PaymentFormProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -91,13 +103,14 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentFormSchema),
     defaultValues: {
-      memberId: "",
-      membershipId: "",
+      memberId: defaultMemberId ?? "",
+      membershipId: defaultMembershipId ?? "",
       amount: "",
       method: "CASH",
       paymentDate: new Date().toISOString().slice(0, 10),
       reference: "",
       notes: "",
+      expectedPaymentDate: "",
     },
   })
 
@@ -120,15 +133,39 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
   )
 
   const chargedMinor = Math.round(Number(amountValue || "0") * 100)
+  const chargedMinorSafe = Number.isFinite(chargedMinor) ? Math.max(0, chargedMinor) : 0
   const amountDiffers =
     selectedMembership !== null &&
-    chargedMinor > 0 &&
-    chargedMinor !== selectedMembership.amountMinor
+    chargedMinorSafe > 0 &&
+    chargedMinorSafe !== selectedMembership.amountMinor
+
+  const remainingMinor = selectedMembership?.outstandingMinor ?? null
+  const paidMinor =
+    selectedMembership != null
+      ? Math.max(0, selectedMembership.amountMinor - selectedMembership.outstandingMinor)
+      : null
+  const afterPaymentMinor =
+    remainingMinor != null && chargedMinorSafe > 0
+      ? Math.max(0, remainingMinor - chargedMinorSafe)
+      : null
+  const exceedsRemaining =
+    remainingMinor != null && remainingMinor > 0 && chargedMinorSafe > remainingMinor
 
   const noMemberships = selectedMember !== null && memberMemberships.length === 0
 
   function onSubmit(data: PaymentFormValues) {
     setServerError(null)
+
+    // Client-side guard mirrors the server rule: never pay more than what is
+    // owed. The server re-checks against live balances.
+    const outstandingMinor = selectedMembership?.outstandingMinor ?? 0
+    if (selectedMembership && chargedMinorSafe > outstandingMinor) {
+      setServerError(
+        `Payment amount cannot exceed the outstanding balance of ${formatMoney(outstandingMinor)}.`
+      )
+      return
+    }
+
     startTransition(async () => {
       const result = await recordPayment({
         memberId: data.memberId,
@@ -138,6 +175,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
         paymentDate: data.paymentDate,
         reference: data.reference || null,
         notes: data.notes || null,
+        expectedPaymentDate: data.expectedPaymentDate || null,
       })
 
       if (result.success) {
@@ -189,6 +227,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                         field.onChange(val ?? "")
                         form.setValue("membershipId", "")
                         form.setValue("amount", "")
+                        form.setValue("expectedPaymentDate", "")
                       }}
                       options={members.map((m) => ({
                         id: m.id,
@@ -216,12 +255,25 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                       onValueChange={(val) => {
                         field.onChange(val ?? "")
                         const picked = memberMemberships.find((ms) => ms.id === val)
-                        if (picked) form.setValue("amount", String(picked.amountMinor / 100))
+                        if (picked) {
+                          // Prefill the remaining balance so "Record Payment"
+                          // settles it; edit the amount down for a partial
+                          // payment. Fully paid memberships get no amount.
+                          const balance = Math.max(0, picked.outstandingMinor)
+                          form.setValue("amount", balance > 0 ? String(balance / 100) : "")
+                          form.setValue(
+                            "expectedPaymentDate",
+                            picked.expectedPaymentDate ?? ""
+                          )
+                        }
                       }}
                       options={memberMemberships.map((ms) => ({
                         id: ms.id,
                         label: `${ms.plan.name} · ${formatDate(ms.startDate)} → ${formatDate(ms.endDate)}`,
-                        sublabel: formatMoney(ms.amountMinor),
+                        sublabel:
+                          ms.outstandingMinor > 0
+                            ? `${formatMoney(ms.outstandingMinor)} outstanding`
+                            : formatMoney(ms.amountMinor),
                       }))}
                       placeholder={
                         selectedMember
@@ -244,7 +296,7 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
             />
 
             {selectedMembership && (
-              <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-xs">
+              <div className="space-y-1.5 rounded-md border bg-muted/40 p-3 text-xs">
                 <p className="font-medium text-foreground">
                   {selectedMembership.plan.name} Membership
                 </p>
@@ -252,12 +304,58 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                   {formatDate(selectedMembership.startDate)} →{" "}
                   {formatDate(selectedMembership.endDate)}
                 </p>
-                <p className="text-muted-foreground">
-                  Plan price: {formatMoney(selectedMembership.plan.priceMinor)}
-                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Membership Amount</span>
+                  <span className="font-medium">
+                    {formatMoney(selectedMembership.amountMinor)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Already Paid</span>
+                  <span>{formatMoney(paidMinor ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t pt-1">
+                  <span className="text-muted-foreground">Current Payment</span>
+                  <span
+                    className={
+                      chargedMinorSafe > 0
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {chargedMinorSafe > 0 ? formatMoney(chargedMinorSafe) : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Remaining After Payment</span>
+                  <span
+                    className={
+                      exceedsRemaining
+                        ? "font-semibold text-red-600 dark:text-red-400"
+                        : remainingMinor != null && afterPaymentMinor != null && afterPaymentMinor > 0
+                          ? "font-semibold text-amber-600 dark:text-amber-400"
+                          : "font-semibold text-emerald-600 dark:text-emerald-400"
+                    }
+                  >
+                    {remainingMinor != null
+                      ? formatMoney(afterPaymentMinor != null ? afterPaymentMinor : remainingMinor)
+                      : "—"}
+                  </span>
+                </div>
+                {exceedsRemaining && remainingMinor != null && (
+                  <p className="text-red-600 dark:text-red-400">
+                    Amount exceeds the outstanding balance by{" "}
+                    {formatMoney(chargedMinorSafe - remainingMinor)}.
+                  </p>
+                )}
+                {remainingMinor != null && remainingMinor <= 0 && (
+                  <p className="text-emerald-600 dark:text-emerald-400">
+                    Fully paid — nothing left to collect.
+                  </p>
+                )}
                 {amountDiffers && (
                   <p className="text-foreground">
-                    Actual charged: {formatMoney(chargedMinor)} (membership recorded at{" "}
+                    Actual charged: {formatMoney(chargedMinorSafe)} (membership recorded at{" "}
                     {formatMoney(selectedMembership.amountMinor)})
                   </p>
                 )}
@@ -281,6 +379,16 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                         {...field}
                       />
                     </FormControl>
+                    {selectedMembership && remainingMinor != null && (
+                      <FormDescription>
+                        {remainingMinor > 0
+                          ? `Outstanding: ${formatMoney(remainingMinor)}`
+                          : "Already fully paid — no balance to collect."}
+                        {afterPaymentMinor != null &&
+                          remainingMinor > 0 &&
+                          ` · Remaining after: ${formatMoney(afterPaymentMinor)}`}
+                      </FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -299,6 +407,29 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="expectedPaymentDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Expected payment due by</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="date"
+                      {...field}
+                      value={field.value ?? ""}
+                      onChange={(e) => field.onChange(e.target.value || "")}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    The day the membership is committed to be fully paid. Used only
+                    to mark the balance Pending or Overdue — never revenue.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}
@@ -380,7 +511,12 @@ export function PaymentForm({ members, trigger }: PaymentFormProps) {
               </Button>
               <Button
                 type="submit"
-                disabled={isPending || !selectedMembershipId || noMemberships}
+                disabled={
+                  isPending ||
+                  !selectedMembershipId ||
+                  noMemberships ||
+                  (remainingMinor != null && remainingMinor <= 0)
+                }
               >
                 {isPending ? "Recording..." : "Record Payment"}
               </Button>

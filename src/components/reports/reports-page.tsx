@@ -35,16 +35,31 @@ import { RevenueTrendChart } from "@/components/charts/revenue-trend-chart"
 import { AttendanceTrendChart } from "@/components/charts/attendance-trend-chart"
 import { BreakdownChart } from "@/components/reports/breakdown-chart"
 import { Input } from "@/components/ui/input"
-import { formatMoney, formatRangeLabel } from "@/lib/format"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { formatDate, formatMoney, formatRangeLabel } from "@/lib/format"
 import { isDayKey } from "@/lib/analytics-core"
-import { LEAD_SOURCE, PAYMENT_METHOD, MEMBERSHIP_LIFECYCLE_STATUS, APPOINTMENT_STATUS } from "@/lib/status"
+import {
+  LEAD_SOURCE,
+  PAYMENT_METHOD,
+  MEMBERSHIP_LIFECYCLE_STATUS,
+  APPOINTMENT_STATUS,
+  OUTSTANDING_STATUS,
+} from "@/lib/status"
 import type { ReportsData } from "@/lib/domain/reports"
+import type { OutstandingDuesRow, OutstandingSummary } from "@/lib/outstanding"
 
 type ReportsPageProps = {
   data: ReportsData
+  dues: { overview: OutstandingSummary; rows: OutstandingDuesRow[] }
 }
 
-export function ReportsPage({ data }: ReportsPageProps) {
+export function ReportsPage({ data, dues }: ReportsPageProps) {
   const [tab, setTab] = useState("overview")
 
   const rangeLabel =
@@ -53,6 +68,21 @@ export function ReportsPage({ data }: ReportsPageProps) {
       : data.range === "30"
         ? "Last 30 days"
         : formatRangeLabel(data.fromKey, data.toKey) || "Custom range"
+
+  const [dueStatus, setDueStatus] = useState<"ALL" | "PAID" | "PENDING" | "OVERDUE">("ALL")
+  const [dueQuery, setDueQuery] = useState("")
+  const needle = dueQuery.trim().toLowerCase()
+  const duesRows = dues.rows.filter((r) => {
+    if (dueStatus !== "ALL" && r.status !== dueStatus) return false
+    if (
+      needle &&
+      !r.memberName.toLowerCase().includes(needle) &&
+      !r.planName.toLowerCase().includes(needle)
+    ) {
+      return false
+    }
+    return true
+  })
 
   return (
     <div className="space-y-6">
@@ -108,6 +138,7 @@ export function ReportsPage({ data }: ReportsPageProps) {
           <TabsTrigger value="revenue">Revenue</TabsTrigger>
           <TabsTrigger value="leads">Leads</TabsTrigger>
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
+          <TabsTrigger value="outstanding">Outstanding</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
@@ -375,6 +406,161 @@ export function ReportsPage({ data }: ReportsPageProps) {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="outstanding" className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            <StatCard
+              label="Outstanding balances"
+              value={formatMoney(dues.overview.totalOutstandingMinor)}
+              hint="across all memberships"
+              icon={Wallet}
+              iconClassName="bg-red-500/10 text-red-600 dark:text-red-400"
+            />
+            <StatCard
+              label="Pending"
+              value={formatMoney(dues.overview.pendingMinor)}
+              hint={`${dues.overview.pendingCount} memberships`}
+              icon={Banknote}
+              iconClassName="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            />
+            <StatCard
+              label="Overdue"
+              value={formatMoney(dues.overview.overdueMinor)}
+              hint={`${dues.overview.overdueCount} memberships`}
+              icon={TrendingUp}
+              iconClassName="bg-red-500/10 text-red-600 dark:text-red-400"
+            />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Dues ledger</CardTitle>
+              <CardDescription className="text-xs">
+                All-time balances from recorded payments — a balance is never
+                revenue. Dues for CANCELLED memberships are excluded.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                {duesRows.length} {duesRows.length === 1 ? "membership" : "memberships"}{" "}
+                shown
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <Input
+                  placeholder="Search by member or plan..."
+                  value={dueQuery}
+                  onChange={(e) => setDueQuery(e.target.value)}
+                  className="max-w-sm"
+                />
+                <Select
+                  value={dueStatus}
+                  onValueChange={(v) => setDueStatus(v as typeof dueStatus)}
+                >
+                  <SelectTrigger className="w-44">
+                    <SelectValue placeholder="All statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All statuses</SelectItem>
+                    <SelectItem value="OVERDUE">Overdue</SelectItem>
+                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="PAID">Paid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {duesRows.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No dues match the current filters.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10 text-muted-foreground">#</TableHead>
+                      <TableHead>Member</TableHead>
+                      <TableHead>Plan</TableHead>
+                      <TableHead>Membership</TableHead>
+                      <TableHead>Expected by</TableHead>
+                      <TableHead className="text-right">Plan</TableHead>
+                      <TableHead className="text-right">Paid</TableHead>
+                      <TableHead className="text-right">Balance</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {duesRows.map((row, index) => {
+                      const config = OUTSTANDING_STATUS[row.status]
+                      const daysLabel =
+                        row.status === "OVERDUE"
+                          ? `${row.daysOverdue}d overdue`
+                          : row.status === "PENDING" && row.expectedPaymentKey
+                            ? `${row.daysRemaining}d left`
+                            : null
+                      return (
+                        <TableRow
+                          key={row.membershipId}
+                          className={row.status === "OVERDUE" ? "bg-red-500/5" : undefined}
+                        >
+                          <TableCell className="w-10 text-xs tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </TableCell>
+                          <TableCell className="font-medium">{row.memberName}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {row.planName}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDate(row.startKey)} → {formatDate(row.endKey)}
+                          </TableCell>
+                          <TableCell>
+                            {row.expectedPaymentKey ? (
+                              <span>
+                                {formatDate(row.expectedPaymentKey)}
+                                {daysLabel && (
+                                  <span
+                                    className={`block text-xs ${
+                                      row.status === "OVERDUE"
+                                        ? "text-red-600 dark:text-red-400"
+                                        : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {daysLabel}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-xs italic text-muted-foreground">
+                                Not set
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatMoney(row.finalPayableMinor)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {formatMoney(row.paidMinor)}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-medium tabular-nums ${
+                              row.outstandingMinor > 0
+                                ? "text-red-600 dark:text-red-400"
+                                : "text-emerald-600 dark:text-emerald-400"
+                            }`}
+                          >
+                            {formatMoney(row.outstandingMinor)}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge tone={config?.tone ?? "muted"}>
+                              {config?.label ?? row.status}
+                            </StatusBadge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

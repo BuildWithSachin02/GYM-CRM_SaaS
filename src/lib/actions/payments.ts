@@ -7,6 +7,8 @@ import { requireUserOrThrow } from "@/lib/auth/auth"
 import { paymentSchema, type PaymentInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { checkMembershipPaymentLink } from "@/lib/payments"
+import { checkPaymentAmount } from "@/lib/outstanding"
+import { dayKeyInTimeZone, utcInstantForKey } from "@/lib/memberships"
 
 export type PaymentActionResult =
   | { success: true; data: { id: string } }
@@ -42,7 +44,13 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
   // client. A member-only (standalone) payment is rejected by the rule.
   const membership = await prisma.membership.findFirst({
     where: { id: data.membershipId, organizationId: user.organizationId },
-    select: { id: true, memberId: true, organizationId: true, status: true },
+    select: {
+      id: true,
+      memberId: true,
+      organizationId: true,
+      status: true,
+      amountMinor: true,
+    },
   })
 
   const link = checkMembershipPaymentLink(
@@ -54,20 +62,61 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
     return { success: false, error: link.error }
   }
 
-  const payment = await prisma.payment.create({
-    data: {
+  // Partial payments are supported, but never overpayment: the amount cannot
+  // exceed what is still owed on this membership. "Paid" is the RECORDED sum
+  // (VOIDED/REFUNDED never count) — the same rule that drives every balance.
+  const paidMinor = await prisma.payment.aggregate({
+    where: {
       organizationId: user.organizationId,
-      memberId: data.memberId,
       membershipId: link.membershipId,
-      amountMinor: data.amountMinor,
-      method: data.method,
-      paymentDate: data.paymentDate,
-      reference: data.reference ?? null,
-      notes: data.notes ?? null,
-      recordedById: user.id,
       status: "RECORDED",
     },
-    select: { id: true },
+    _sum: { amountMinor: true },
+  })
+  const remainingMinor = membership!.amountMinor - (paidMinor._sum.amountMinor ?? 0)
+  const amountCheck = checkPaymentAmount({
+    amountMinor: data.amountMinor,
+    remainingMinor,
+  })
+  if (!amountCheck.ok) {
+    return { success: false, error: amountCheck.error }
+  }
+
+  const payment = await prisma.$transaction(async (tx) => {
+    const created = await tx.payment.create({
+      data: {
+        organizationId: user.organizationId,
+        memberId: data.memberId,
+        membershipId: link.membershipId,
+        amountMinor: data.amountMinor,
+        method: data.method,
+        paymentDate: data.paymentDate,
+        reference: data.reference ?? null,
+        notes: data.notes ?? null,
+        recordedById: user.id,
+        status: "RECORDED",
+      },
+      select: { id: true },
+    })
+
+    // The form can (re)set the commitment day this membership should be paid
+    // in full by — stored as the org-timezone local midnight (same convention
+    // as membership periods). Null clears it; it never creates revenue.
+    if ("expectedPaymentDate" in data) {
+      const raw = data.expectedPaymentDate
+      const expected = raw
+        ? utcInstantForKey(
+            dayKeyInTimeZone(raw, user.organization.timezone),
+            user.organization.timezone
+          )
+        : null
+      await tx.membership.update({
+        where: { id: link.membershipId },
+        data: { expectedPaymentDate: expected },
+      })
+    }
+
+    return created
   })
 
   await writeAudit({

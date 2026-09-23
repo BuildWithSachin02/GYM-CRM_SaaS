@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ArrowLeft, ScrollText } from "lucide-react"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
 
-import { formatDate, formatDayKey } from "@/lib/format"
+import { formatDate, formatDayKey, formatMoney } from "@/lib/format"
 import { MEMBERSHIP_LIFECYCLE_STATUS } from "@/lib/status"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -37,6 +37,14 @@ type SerializedMembership = {
   renewedThrough: boolean
   /** Member-level "needs renewal now" flag (server decision from total coverage). */
   canRenew: boolean
+  /** Amount actually charged for this membership (minor units). */
+  amountMinor: number
+  /** Sum of RECORDED payments settled against this membership. */
+  paidMinor: number
+  /** amountMinor - paidMinor; never negative (overpayment is rejected). */
+  outstandingMinor: number
+  /** Commitment date (ISO) the balance is due by, or null. */
+  expectedPaymentDate: string | null
 }
 
 type MembershipHistoryProps = {
@@ -80,6 +88,9 @@ export function MembershipHistory({
             <TableRow>
               <TableHead className="w-10 text-muted-foreground">#</TableHead>
               <TableHead>Plan</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              <TableHead className="text-right">Paid</TableHead>
+              <TableHead className="text-right">Pending</TableHead>
               <TableHead>Start Date</TableHead>
               <TableHead>End Date</TableHead>
               <TableHead>Status</TableHead>
@@ -96,6 +107,26 @@ export function MembershipHistory({
                     {index + 1}
                   </TableCell>
                   <TableCell className="font-medium">{m.planName}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatMoney(m.amountMinor)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatMoney(m.paidMinor)}
+                  </TableCell>
+                  <TableCell
+                    className={`text-right tabular-nums ${
+                      m.outstandingMinor > 0
+                        ? "font-semibold text-red-600 dark:text-red-400"
+                        : "text-emerald-600 dark:text-emerald-400"
+                    }`}
+                  >
+                    {formatMoney(m.outstandingMinor)}
+                    {m.outstandingMinor > 0 && m.expectedPaymentDate && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        expected {formatDate(m.expectedPaymentDate)}
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(m.startDate)}
                   </TableCell>

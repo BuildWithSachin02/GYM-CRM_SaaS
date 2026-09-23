@@ -177,3 +177,26 @@ test("RECORDED/Day attribution: today's revenue buckets only the payments attrib
     0
   )
 })
+
+// ---------------------------------------------------------------------------
+// Revenue vs Outstanding — the two ledgers never collide.
+// ---------------------------------------------------------------------------
+
+test("a ₹1,000 partial payment is ₹1,000 revenue; the remaining ₹4,000 outstanding is never revenue", () => {
+  // Membership agreed at ₹5,000 but only ₹1,000 has physically been received.
+  // Revenue counts the ₹1,000 (and only that). The ₹4,000 a member still owes
+  // lives in the outstanding/dues ledger — it must NEVER appear in revenue.
+  const received: PaymentRow[] = [
+    { paymentDate: IN_IST("2026-09-22T00:30:00Z"), amountMinor: 100000, status: "RECORDED" },
+  ]
+  const revenueOfDay = sumByDay(
+    attributeMinorByDay(filterRecordedPayments(received), TZ),
+    rangeKeysEndingAt("2026-09-22", 1)
+  )
+  assert.equal(revenueOfDay, 100000)
+  // The unpaid price is not payable-looking revenue.
+  assert.notEqual(revenueOfDay, 500000)
+  const outstanding = 500000 - memberTotal(received)
+  assert.equal(outstanding, 400000)
+  assert.equal(memberTotal(received), 100000)
+})

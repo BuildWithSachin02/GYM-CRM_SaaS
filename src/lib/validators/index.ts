@@ -149,6 +149,9 @@ export const paymentSchema = z.object({
   paymentDate: requiredDate(),
   reference: optionalText(120),
   notes: optionalText(500),
+  // Optional commitment date to (re)set on the membership. It never affects
+  // revenue — it only drives the derived PENDING/OVERDUE outstanding status.
+  expectedPaymentDate: nullableDate(),
 })
 
 export type PaymentInput = z.input<typeof paymentSchema>

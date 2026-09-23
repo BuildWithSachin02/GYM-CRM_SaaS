@@ -82,6 +82,18 @@ export const PAYMENT_STATUS: Record<
   VOIDED: { tone: "muted", label: "Voided" },
 }
 
+// Derived (never stored) outstanding state of a membership's balance.
+export type OutstandingStatusKey = "PAID" | "PENDING" | "OVERDUE"
+
+export const OUTSTANDING_STATUS: Record<
+  OutstandingStatusKey,
+  { tone: BadgeTone; label: string }
+> = {
+  PAID: { tone: "success", label: "Paid" },
+  PENDING: { tone: "warning", label: "Pending" },
+  OVERDUE: { tone: "destructive", label: "Overdue" },
+}
+
 export const PAYMENT_METHOD: Record<PaymentMethod, { tone: BadgeTone; label: string }> = {
   CASH: { tone: "muted", label: "Cash" },
   UPI: { tone: "info", label: "UPI" },

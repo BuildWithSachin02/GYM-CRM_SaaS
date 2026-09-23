@@ -115,11 +115,13 @@ test("memberships row renders money as a decimal, duration, and joins names", ()
     endDate: new Date("2026-09-30T00:00:00.000Z"),
     amountMinor: 200000,
     renewsAutomatically: true,
+    expectedPaymentDate: null,
     notes: null,
     createdAt: new Date(hoursAt(9)),
     updatedAt: new Date(hoursAt(9)),
-    member: { firstName: "Aarav", lastName: "Sharma" },
+    member: { firstName: "Aarav", lastName: "Sharma", phone: null },
     plan: { name: "Annual Gold", priceMinor: 250000 },
+    _finance: { paidMinor: 50000, outstandingMinor: 150000, expectedPaymentKey: "2026-09-25", status: "PENDING" },
   }
   const cells = mapExportRow("memberships", row, TZ)
   assert.equal(cells.length, EXPORT_COLUMNS.memberships.length)
@@ -128,7 +130,12 @@ test("memberships row renders money as a decimal, duration, and joins names", ()
   assert.equal(cells[5], 2500) // plan price ₹2,500 (comparison field, not revenue)
   assert.equal(cells[8], 29) // inclusive period length in calendar days
   assert.equal(cells[10], 2000) // 200000 paise → 2000.00 charged amount
-  assert.equal(cells[11], "Yes")
+  // Service-enriched balance columns: RECORDED-paid vs remaining (never revenue).
+  assert.equal(cells[11], 500) // ₹500 paid so far
+  assert.equal(cells[12], 1500) // ₹1,500 outstanding
+  assert.equal(dateCell(cells[13]).toISOString(), "2026-09-25T00:00:00.000Z") // expected date local day
+  assert.equal(cells[14], "PENDING")
+  assert.equal(cells[15], "Yes")
   assert.equal(dateCell(cells[6]).toISOString(), "2026-09-01T00:00:00.000Z")
 })
 

@@ -61,10 +61,11 @@ function membershipRow(id: string, amountMinor: number, priceMinor: number): Exp
     endDate: new Date("2026-09-30T00:00:00.000Z"),
     amountMinor,
     renewsAutomatically: false,
+    expectedPaymentDate: null,
     notes: null,
     createdAt: NOW,
     updatedAt: NOW,
-    member: { firstName: "Aarav", lastName: "Sharma" },
+    member: { firstName: "Aarav", lastName: "Sharma", phone: null },
     plan: { name: "Annual Gold", priceMinor },
   }
 }

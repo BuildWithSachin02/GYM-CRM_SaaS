@@ -152,10 +152,21 @@ export type ExportRowMap = {
     amountMinor: number
     renewsAutomatically: boolean
     notes: string | null
+    expectedPaymentDate: Date | null
     createdAt: Date
     updatedAt: Date
-    member: { firstName: string; lastName: string }
+    member: { firstName: string; lastName: string; phone?: string | null }
     plan: { name: string; priceMinor: number }
+    /**
+     * Balance enrichment computed by the export service from RECORDED payments
+     * (never stored on the membership). Absent rows render blank balance cells.
+     */
+    _finance?: {
+      paidMinor: number
+      outstandingMinor: number
+      expectedPaymentKey: string | null
+      status: "PAID" | "PENDING" | "OVERDUE"
+    }
   }
   plans: {
     id: string
@@ -323,6 +334,10 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Duration (Days)", kind: "number" },
     { header: "Status", kind: "text" },
     { header: "Amount (INR)", kind: "money" },
+    { header: "Total Paid (INR)", kind: "money" },
+    { header: "Outstanding (INR)", kind: "money" },
+    { header: "Expected Payment Date", kind: "date" },
+    { header: "Payment Status", kind: "text" },
     { header: "Renews Automatically", kind: "text" },
     { header: "Notes", kind: "text" },
     { header: "Created At", kind: "datetime" },
@@ -520,6 +535,12 @@ function mapMembershipsRow(row: ExportRowMap["memberships"], timeZone: string): 
     startKey && endKey ? daysBetweenKeys(startKey, endKey) : "",
     row.status,
     minorToRupees(row.amountMinor),
+    // Balance columns come from the service-computed _finance enrichment
+    // (RECORDED payments only — a balance is never revenue).
+    row._finance ? minorToRupees(row._finance.paidMinor) : "",
+    row._finance ? minorToRupees(row._finance.outstandingMinor) : "",
+    dateCellFromKey(row._finance?.expectedPaymentKey),
+    row._finance?.status ?? "",
     row.renewsAutomatically ? "Yes" : "No",
     empty(row.notes),
     dateTimeCellInZone(row.createdAt, timeZone),

@@ -183,8 +183,8 @@ function addDetailSheet(
 function addMemberFinancialSummarySheet(
   workbook: ExcelJS.Workbook,
   rows: MemberFinancialSummaryRow[],
-  prevKey: DataCategoryKey,
-  nextKey: DataCategoryKey | undefined
+  prevKey: NavKey,
+  nextKey: NavKey | undefined
 ): ExcelJS.Worksheet {
   const sheetName = "Member Financial Summary"
   const sheet = workbook.addWorksheet(sheetName)
@@ -194,8 +194,8 @@ function addMemberFinancialSummarySheet(
   })
 
   setHyperlink(sheet.getCell("A1"), "← Back to Summary", sheetAnchor("Summary"))
-  if (prevKey) setHyperlink(sheet.getCell("B1"), `← ${CATEGORY_META[prevKey].label}`, sheetAnchor(CATEGORY_META[prevKey].label.slice(0, 31)))
-  if (nextKey) setHyperlink(sheet.getCell("C1"), `${CATEGORY_META[nextKey].label} →`, sheetAnchor(CATEGORY_META[nextKey].label.slice(0, 31)))
+  if (prevKey) setHyperlink(sheet.getCell("B1"), `← ${navLabel(prevKey)}`, sheetAnchor(sheetNameFor(prevKey)))
+  if (nextKey) setHyperlink(sheet.getCell("C1"), `${navLabel(nextKey)} →`, sheetAnchor(sheetNameFor(nextKey)))
 
   FINANCIAL_SUMMARY_COLUMNS.forEach((col, i) => {
     sheet.getCell(2, i + 1).value = col.header
@@ -212,6 +212,21 @@ function addMemberFinancialSummarySheet(
 // ---------------------------------------------------------------------------
 // Summary sheet (3 sections)
 // ---------------------------------------------------------------------------
+
+/**
+ * Navigation neighbours inside a workbook: a selectable category, or the
+ * derived "financial" sheet (Member Financial Summary).
+ */
+type NavKey = DataCategoryKey | "financial"
+
+function navLabel(key: NavKey): string {
+  if (key === "financial") return "Member Financial Summary"
+  return CATEGORY_META[key].label
+}
+
+function sheetNameFor(key: NavKey): string {
+  return navLabel(key).slice(0, 31)
+}
 
 type IndexLevel = {
   items: ModuleIndexItem[]
@@ -357,13 +372,15 @@ export function buildWorkbookFile(input: WorkbookBuildInput): Promise<WorkbookBu
   const indexLevel = buildIndexItems(input.sheets, input.financialRows.length)
   addSummarySheet(workbook, input, indexLevel)
 
-  // Detail sheets in canonical order; MFS right after Payments.
+  // Detail sheets in canonical order; the Member Financial Summary sits right
+  // after Payments so the money narrative flows: Payments → Member Finances.
   for (const key of sheetKeys) {
     const data = input.sheets.find((s) => s.key === key)!
     const sheetIndex = sheetKeys.indexOf(key)
     addDetailSheet(workbook, key, data.rows, input.timeZone, sheetIndex, sheetKeys)
     if (key === "payments" && input.financialRows.length > 0) {
-      addMemberFinancialSummarySheet(workbook, input.financialRows, "payments", sheetKeys[sheetIndex + 1])
+      const nextKey = sheetKeys[sheetIndex + 1]
+      addMemberFinancialSummarySheet(workbook, input.financialRows, "payments", nextKey)
     }
   }
 

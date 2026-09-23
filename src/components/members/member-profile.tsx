@@ -23,10 +23,11 @@ import {
 import { toast } from "sonner"
 
 import { formatDate, formatDateTime, formatDayKey, formatMoney, formatTimeInZone, fullName, pluralize } from "@/lib/format"
-import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
+import { MEMBERSHIP_LIFECYCLE_STATUS, MEMBER_STATUS, OUTSTANDING_STATUS, PAYMENT_METHOD, PLAN_INTERVAL } from "@/lib/status"
 import { getSafeReturnPath } from "@/lib/navigation"
 import type { MemberStatus, PaymentMethod, PaymentStatus } from "@prisma/client"
 import type { MembershipLifecycleStatus } from "@/lib/memberships"
+import type { OutstandingStatus } from "@/lib/outstanding"
 
 import { archiveMember } from "@/lib/actions/members"
 import { PageHeader } from "@/components/common/page-header"
@@ -52,6 +53,7 @@ import { Separator } from "@/components/ui/separator"
 import { MemberForm } from "@/components/members/member-form"
 import { MembershipForm } from "@/components/memberships/membership-form"
 import { RenewalForm } from "@/components/memberships/renewal-form"
+import { PaymentForm } from "@/components/payments/payment-form"
 
 type MemberProfileProps = {
   member: {
@@ -79,6 +81,14 @@ type MemberProfileProps = {
       daysUntilStart: number | null
       /** Amount actually charged for this membership (minor units). */
       amountMinor: number
+      /** Sum of RECORDED payments settled against this membership. */
+      paidMinor: number
+      /** amountMinor - paidMinor; never negative (overpayment is rejected). */
+      outstandingMinor: number
+      /** Commitment date (org-local ISO) the balance is due by, or null. */
+      expectedPaymentDate: string | null
+      /** Derived balance status; null for CANCELLED outcomes. */
+      outstandingStatus: OutstandingStatus | null
       /** True when this record is the member's primary/current display row. */
       isPrimary: boolean
       /** True when a later record continues coverage past this one's end. */
@@ -121,6 +131,8 @@ type MemberProfileProps = {
       locationName: string | null
     }[]
     checkInCount: number
+    /** Total of RECORDED payments for this member (not just recent rows). */
+    totalPaidMinor: number
   }
   attendance: {
     lifetime: {
@@ -138,6 +150,7 @@ type MemberProfileProps = {
   canUpdate: boolean
   canArchive: boolean
   canManageMemberships: boolean
+  canRecordPayment: boolean
   /** Active plans the owner can sell from this profile. */
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   /** Business date (YYYY-MM-DD) in the org's timezone. */
@@ -165,6 +178,7 @@ export function MemberProfile({
   canUpdate,
   canArchive,
   canManageMemberships,
+  canRecordPayment,
   plans,
   todayKey,
   renewal,
@@ -525,7 +539,7 @@ export function MemberProfile({
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Total Payments</span>
                 <span className="font-semibold">
-                  {formatMoney(member.payments.reduce((sum, p) => sum + p.amountMinor, 0))}
+                  {formatMoney(member.totalPaidMinor)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-sm">
@@ -561,6 +575,9 @@ export function MemberProfile({
                       : statusKey === "UPCOMING" && membership.daysUntilStart !== null
                         ? ` · starts in ${membership.daysUntilStart}d`
                         : ""
+                  const outstandingEntry = membership.outstandingStatus
+                    ? OUTSTANDING_STATUS[membership.outstandingStatus]
+                    : null
 
                   return (
                     <div key={membership.id} className="space-y-2">
@@ -599,6 +616,85 @@ export function MemberProfile({
                               </p>
                             )}
                       </div>
+
+                      <div className="space-y-1 rounded-md border bg-muted/40 p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Amount</span>
+                          <span>{formatMoney(membership.amountMinor)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Paid</span>
+                          <span>{formatMoney(membership.paidMinor)}</span>
+                        </div>
+                        {membership.outstandingMinor > 0 ? (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Pending</span>
+                              <span className="font-semibold text-red-600 dark:text-red-400">
+                                {formatMoney(membership.outstandingMinor)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Expected by</span>
+                              <span>
+                                {membership.expectedPaymentDate ? (
+                                  formatDate(membership.expectedPaymentDate)
+                                ) : (
+                                  <span className="italic text-muted-foreground">Not set</span>
+                                )}
+                              </span>
+                            </div>
+                            {outstandingEntry && membership.outstandingStatus && (
+                              <div className="flex items-center justify-between pt-0.5">
+                                <span className="text-muted-foreground">Payment status</span>
+                                <StatusBadge tone={outstandingEntry.tone}>
+                                  {outstandingEntry.label}
+                                </StatusBadge>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Pending</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              Fully paid
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {canRecordPayment &&
+                        member.status !== "ARCHIVED" &&
+                        membership.outstandingMinor > 0 && (
+                          <PaymentForm
+                            members={[
+                              {
+                                id: member.id,
+                                firstName: member.firstName,
+                                lastName: member.lastName,
+                                phone: member.phone,
+                                memberships: member.memberships.map((ms) => ({
+                                  id: ms.id,
+                                  startDate: ms.startDate,
+                                  endDate: ms.endDate,
+                                  amountMinor: ms.amountMinor,
+                                  status: ms.status,
+                                  expectedPaymentDate: ms.expectedPaymentDate,
+                                  paidMinor: ms.paidMinor,
+                                  outstandingMinor: ms.outstandingMinor,
+                                  plan: { name: ms.plan.name, priceMinor: ms.plan.priceMinor },
+                                })),
+                              },
+                            ]}
+                            defaultMemberId={member.id}
+                            defaultMembershipId={membership.id}
+                            trigger={
+                              <Button variant="outline" size="sm" className="w-full">
+                                Record payment
+                              </Button>
+                            }
+                          />
+                        )}
                     </div>
                   )
                 })}

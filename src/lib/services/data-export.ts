@@ -20,6 +20,10 @@ import {
   type FinancialMembershipRow,
   type FinancialPaymentRow,
 } from "@/lib/data-financials"
+import {
+  buildOutstandingTotals,
+  outstandingOfMembership,
+} from "@/lib/outstanding"
 import { prisma } from "@/lib/prisma"
 import {
   buildWorkbookFile,
@@ -104,7 +108,7 @@ async function fetchBatch(
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          member: { select: { firstName: true, lastName: true } },
+          member: { select: { firstName: true, lastName: true, phone: true } },
           plan: { select: { name: true, priceMinor: true } },
         },
       })) as unknown as ExportRowMap["memberships"][]
@@ -463,6 +467,34 @@ export async function buildExportWorkbook(args: BuildExportArgs): Promise<Workbo
 
   const counts = await loadSummaryCounts(args)
   const financial = await loadFinancialAggregation(args)
+
+  // Balances are ALL-TIME and org-scoped (a pending balance is a live
+  // snapshot, not range-restricted). Computed once from RECORDED payments and
+  // used to enrich the Memberships sheet so Plan - Paid = Pending holds right
+  // next to the membership rows that own them.
+  const membershipSheet = sheets.find((s) => s.key === "memberships")
+  if (membershipSheet) {
+    const orgPayments = await prisma.payment.findMany({
+      where: { organizationId: args.organizationId },
+      select: { membershipId: true, amountMinor: true, status: true },
+    })
+
+    const totals = buildOutstandingTotals(orgPayments)
+    for (const row of membershipSheet.rows as ExportRowMap["memberships"][]) {
+      const paidMinor = totals.get(row.id)?.paidMinor ?? 0
+      const balance = outstandingOfMembership({
+        row,
+        paidMinor,
+        timeZone: args.timeZone,
+      })
+      row._finance = {
+        paidMinor,
+        outstandingMinor: balance.outstandingMinor,
+        expectedPaymentKey: balance.expectedPaymentKey,
+        status: balance.status,
+      }
+    }
+  }
 
   return buildWorkbookFile({
     gymName: args.gymName,

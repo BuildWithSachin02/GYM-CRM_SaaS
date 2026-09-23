@@ -7,7 +7,7 @@ import { Banknote, SearchIcon } from "lucide-react"
 import type { PaymentMethod, PaymentStatus } from "@prisma/client"
 
 import { formatDate, formatMoney, fullName } from "@/lib/format"
-import { PAYMENT_METHOD, PAYMENT_STATUS } from "@/lib/status"
+import { PAYMENT_METHOD, OUTSTANDING_STATUS, PAYMENT_STATUS } from "@/lib/status"
 import { voidPayment } from "@/lib/actions/payments"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -81,6 +81,9 @@ type MemberOption = {
     endDate: string
     amountMinor: number
     status: string
+    expectedPaymentDate: string | null
+    paidMinor: number
+    outstandingMinor: number
     plan: { name: string; priceMinor: number }
   }[]
 }
@@ -89,7 +92,7 @@ type PaymentListProps = {
   payments: SerializedPayment[]
   totalCount: number
   totalPages: number
-  filters: { q: string; method: string; from: string; to: string; page: number }
+  filters: { q: string; method: string; from: string; to: string; page: number; dueStatus: string }
   canCreate: boolean
   members: MemberOption[]
 }
@@ -100,6 +103,12 @@ const METHOD_OPTIONS: { value: string; label: string }[] = [
     value,
     label,
   })),
+]
+
+const DUE_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All Dues" },
+  { value: "OVERDUE", label: OUTSTANDING_STATUS.OVERDUE.label },
+  { value: "PENDING", label: OUTSTANDING_STATUS.PENDING.label },
 ]
 
 export function PaymentList({
@@ -144,7 +153,7 @@ export function PaymentList({
     }
   }, [])
 
-  function updateFilters(key: "method" | "from" | "to", value: string) {
+  function updateFilters(key: "method" | "from" | "to" | "dueStatus", value: string) {
     const params = new URLSearchParams(searchParams.toString())
     if (value) {
       params.set(key, value)
@@ -179,7 +188,7 @@ export function PaymentList({
   const currentPage = filters.page
   const hasPrev = currentPage > 1
   const hasNext = currentPage < totalPages
-  const hasFilters = !!(filters.q || filters.method || filters.from || filters.to)
+  const hasFilters = !!(filters.q || filters.method || filters.from || filters.to || filters.dueStatus)
 
   return (
     <div className="space-y-4">
@@ -213,6 +222,21 @@ export function PaymentList({
               </SelectTrigger>
               <SelectContent>
                 {METHOD_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Dues</span>
+            <Select value={filters.dueStatus} onValueChange={(v) => updateFilters("dueStatus", v ?? "")}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="All Dues" />
+              </SelectTrigger>
+              <SelectContent>
+                {DUE_STATUS_OPTIONS.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>
