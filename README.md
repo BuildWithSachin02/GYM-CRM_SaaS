@@ -206,7 +206,7 @@ All business queries should be scoped to the **currently authenticated tenant**,
 | **QR Generation**            | qrcode                  |
 | **Date Utilities**           | date-fns                |
 | **Authentication Utilities** | bcryptjs                |
-| **Theme Management**         | next-themes             |
+| **Theme Management**         | Custom (SSR-injected provider) |
 
 ---
 

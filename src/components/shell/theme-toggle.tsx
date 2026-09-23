@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react"
 import { Check, Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
-import { useTheme } from "next-themes"
+import { useTheme, type Theme } from "@/components/theme-provider"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -14,13 +14,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-const THEMES: { value: string; label: string; icon: LucideIcon }[] = [
+const THEMES: { value: Theme; label: string; icon: LucideIcon }[] = [
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
   { value: "system", label: "System", icon: Monitor },
 ]
 
-function themeLabel(theme?: string): string {
+function themeLabel(theme?: Theme): string {
   return THEMES.find((t) => t.value === theme)?.label ?? "System"
 }
 
