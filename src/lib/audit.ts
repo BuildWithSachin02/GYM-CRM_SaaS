@@ -58,6 +58,7 @@ export const AUDIT_ACTIONS = {
   STAFF_UPDATED: "staff.updated",
   CHECKIN_MANUAL: "attendance.manual",
   CHECKIN_QR: "attendance.qr",
+  CHECKIN_MEMBER_CORRECTED: "attendance.checkin_member_corrected",
   QR_SESSION_CREATED: "qrsession.created",
   QR_SESSION_REVOKED: "qrsession.revoked",
   ATTENDANCE_REQUEST_CREATED: "attendance.request_created",

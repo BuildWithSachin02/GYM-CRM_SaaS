@@ -43,6 +43,22 @@ export default async function MemberAttendanceRoute({
   })
   if (!member) notFound()
 
+  const canCorrect =
+    can(user, "attendance:record") && ["OWNER", "ADMIN"].includes(user.role)
+
+  const correctMembers = canCorrect
+    ? await prisma.member.findMany({
+        where: {
+          organizationId: user.organizationId,
+          status: "ACTIVE",
+          deletedAt: null,
+          id: { not: member.id },
+        },
+        select: { id: true, firstName: true, lastName: true },
+        orderBy: { firstName: "asc" },
+      })
+    : []
+
   const qp = await searchParams
   const timeZone = user.organization.timezone
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
@@ -86,6 +102,8 @@ export default async function MemberAttendanceRoute({
       totalPages={view.totalPages}
       page={view.page}
       pageSize={PAGE_SIZE}
+      canCorrect={canCorrect}
+      correctMembers={correctMembers}
     />
   )
 }

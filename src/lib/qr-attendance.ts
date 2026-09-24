@@ -76,3 +76,85 @@ export function decideAttendanceApproval(
   if (!input.requestDayCovered) return { allowed: false, reason: "still_expired" }
   return { allowed: true }
 }
+
+/**
+ * Staff gate for correcting an incorrectly attributed check-in (pure).
+ *
+ * The correction REASSIGNS the existing CheckIn row to the intended member —
+ * it never deletes the record, and it never creates a second row for the same
+ * day (duplicates stay blocked). The gate order matches the server flow:
+ *   1. the check-in must exist in the tenant
+ *   2. the target must actually be a different member
+ *   3. check-ins produced by an approved AttendanceRequest are never
+ *      reassigned (the request is bound to its own member)
+ *   4. the target member must exist in the SAME organization and not be deleted
+ *   5. the target member must NOT already have a check-in for that day
+ */
+export type AttendanceCorrectionGate =
+  | { allowed: true }
+  | { allowed: false; reason: "not_found" }
+  | { allowed: false; reason: "no_change" }
+  | { allowed: false; reason: "linked_to_request" }
+  | { allowed: false; reason: "member_invalid" }
+  | { allowed: false; reason: "duplicate_day" }
+
+export type AttendanceCorrectionInput = {
+  checkInExists: boolean
+  sameMember: boolean
+  linkedToRequest: boolean
+  targetMemberValid: boolean
+  targetHasCheckInOnDay: boolean
+}
+
+export function decideAttendanceCorrection(
+  input: AttendanceCorrectionInput
+): AttendanceCorrectionGate {
+  if (!input.checkInExists) return { allowed: false, reason: "not_found" }
+  if (input.sameMember) return { allowed: false, reason: "no_change" }
+  if (input.linkedToRequest) return { allowed: false, reason: "linked_to_request" }
+  if (!input.targetMemberValid) return { allowed: false, reason: "member_invalid" }
+  if (input.targetHasCheckInOnDay) return { allowed: false, reason: "duplicate_day" }
+  return { allowed: true }
+}
+
+// ---------------------------------------------------------------------------
+// Identity confirmation (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mask a phone number for the public identity-confirmation screen. Only the
+ * last four digits are ever exposed — never the raw number.
+ */
+export function maskPhone(phone: string | null | undefined): string {
+  if (!phone) return ""
+  const digits = phone.replace(/\D/g, "")
+  if (digits.length === 0) return ""
+  return `******${digits.slice(-4)}`
+}
+
+export type IdentitySummaryInput = {
+  firstName: string
+  lastName: string
+  phone: string | null | undefined
+  /** Current plan name when the member is covered today, else null. */
+  membershipPlanName?: string | null
+}
+
+export type IdentitySummary = {
+  name: string
+  maskedPhone: string
+  membershipPlanName: string | null
+}
+
+/**
+ * The confirming details shown BEFORE a trusted device may be created. Enough
+ * to catch a wrong-member selection (name + masked phone + current plan) but
+ * deliberately free of sensitive data.
+ */
+export function buildIdentitySummary(input: IdentitySummaryInput): IdentitySummary {
+  return {
+    name: `${input.firstName} ${input.lastName}`.trim(),
+    maskedPhone: maskPhone(input.phone),
+    membershipPlanName: input.membershipPlanName ?? null,
+  }
+}

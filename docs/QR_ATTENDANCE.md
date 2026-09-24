@@ -77,6 +77,27 @@ To avoid re-searching the member list on every scan, a browser can *remember* th
 - Revocation: at most 3 active devices per member (oldest auto-revoked on overflow). Staff can revoke any device from the member profile; the member may then simply check in again via search. A revoked/missing/other-gym device makes the scan **silently fall back to the member-search flow**.
 - Device rows cascade-delete with their member (no orphaned hashes survive a member reset). See `DATABASE_DESIGN.md`.
 
+### 9.1 Identity confirmation before remembering
+
+Before a device is ever created the member is shown an explicit **confirmation screen** (`Confirm your identity`): their full name, a **masked phone** (`maskPhone`, only the last four digits — the raw number is never sent to the browser) and the current plan label when today is covered. The "Remember this device" checkbox lives **on the confirmation screen, unchecked by default**, and resets to unchecked before every selection. Selecting a name from search alone never creates a device; only confirmation does.
+
+### 9.2 "Not you? Report wrong identity"
+
+If a device was bound to the wrong person, the member can hit **"Not you? Report wrong identity"** (shown on the checking/result screens only when a device is involved — remembered or just created):
+
+- The server revokes **only the current browser's device** (identified from the device cookie) and clears the cookie, so the very next scan falls back to member search. It is idempotent and performs **no** attendance writes.
+- It **never** creates, transfers, or deletes a check-in. Already-recorded wrong check-ins stay for staff to fix; the member reports at reception.
+- An audit entry (`qr.device_revoked`, reason `member_wrong_identity`) is recorded in the correct tenant context.
+
+### 9.3 Staff correction of a wrongly attributed check-in
+
+OWNER/ADMIN (with `attendance:record`) see an **Actions / Correct** button on `QR_SESSION` rows in the member attendance page. A dialog reassigns the existing `CheckIn` to the correct member:
+
+- The existing row is **reassigned** (`memberId` updated) — never deleted, never duplicated. The `@@unique([organizationId, memberId, dayKey])` constraint keeps one check-in per member per day, and reports/history recompute automatically.
+- The server re-validates everything: same organization, different member, valid non-deleted target, no existing check-in for the target on that day, and the check-in must **not** be linked to an approved `AttendanceRequest` (those are never reassigned).
+- A P2002 (duplicate) race is caught defensively and surfaced as `duplicate_day`.
+- Every correction writes an **audit trail** (`attendance.checkin_member_corrected`, with before/after member and optional staff reason).
+
 ## 10. Expired membership → pending attendance request
 
 When the member's membership does not cover the scan day (EXPIRED / CANCELLED / PAUSED / UPCOMING / none), no CheckIn is created. Instead:

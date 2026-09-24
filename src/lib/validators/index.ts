@@ -339,6 +339,16 @@ export type AttendanceRequestDecisionInput = z.input<typeof attendanceRequestDec
 
 // ---------------------------------------------------------------------------
 
+export const attendanceCorrectionSchema = z.object({
+  checkInId: z.string().uuid("Invalid check-in"),
+  memberId: z.string().uuid("Invalid member"),
+  reason: optionalText(500),
+})
+
+export type AttendanceCorrectionInput = z.input<typeof attendanceCorrectionSchema>
+
+// ---------------------------------------------------------------------------
+
 /**
  * A valid, real calendar day key (YYYY-MM-DD) for the org-timezone date
  * filters. Rejects malformed and impossible dates before they hit a query.

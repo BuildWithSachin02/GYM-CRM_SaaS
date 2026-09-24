@@ -50,6 +50,8 @@ Prioritized flow and requirements live in `QR_ATTENDANCE.md`. Security-relevant 
 - Tokens expire and can be revoked.
 - Check-in binds to the token issuer, member, location, and timestamp; duplicate scans rejected.
 - **Trusted devices** (`MemberDevice`) are identification-only conveniences: the raw 32-byte device token lives only in an HttpOnly cookie and only its SHA-256 hash is stored; the cookie carries no member/org ID; devices are opt-in, capped, and revocable; every scan still re-validates tenancy, QR validity, membership coverage and duplicate rules server-side. See `QR_ATTENDANCE.md` §9-11.
+- Device creation requires an explicit **identity-confirmation screen** (name + masked phone + plan label), and the wrong-identity safety action revokes the current browser's device and records an audit event without ever writing attendance.
+- **Staff correction** of a wrongly attributed check-in reassigns the existing `CheckIn` (never deletes/duplicates), is gated to OWNER/ADMIN with `attendance:record`, re-validates tenancy and the target member server-side, blocks approved-request-linked check-ins, and writes before/after audit entries. See `QR_ATTENDANCE.md` §9.3.
 - **Expired-membership scans** create a PENDING `AttendanceRequest` (reviewed/approved by staff) rather than a silent denial or a non-approved check-in; approval reconditions membership coverage on the original request day. See `QR_ATTENDANCE.md` §10.
 
 ## 6. Payments security

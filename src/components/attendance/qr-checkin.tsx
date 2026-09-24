@@ -2,17 +2,39 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
-import { CheckCircle, Clock, Info, QrCode, TriangleAlert, XCircle } from "lucide-react"
+import {
+  CheckCircle,
+  Clock,
+  Info,
+  QrCode,
+  ShieldCheck,
+  TriangleAlert,
+  UserCheck,
+  XCircle,
+} from "lucide-react"
 
-import { autoQrCheckin, qrCheckin, type QrCheckinResult } from "@/lib/actions/attendance"
+import {
+  autoQrCheckin,
+  qrCheckin,
+  reportWrongIdentity,
+  type QrCheckinResult,
+} from "@/lib/actions/attendance"
+import type { IdentitySummary } from "@/lib/qr-attendance"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { StatusBadge } from "@/components/common/status-badge"
 
-type Member = { id: string; firstName: string; lastName: string }
+export type RememberedMember = { id: string; firstName: string; lastName: string }
+
+export type Member = {
+  id: string
+  firstName: string
+  lastName: string
+  /** Server-derived identity summary for the confirmation screen. */
+  identity: IdentitySummary
+}
 
 type QrCheckinProps = {
   token: string
@@ -20,10 +42,10 @@ type QrCheckinProps = {
   members: Member[]
   errorMessage?: string
   /** Server-resolved remembered device member (same gym as the QR). */
-  rememberedMember?: Member | null
+  rememberedMember?: RememberedMember | null
 }
 
-type View = "checking" | "result" | "search"
+type View = "checking" | "confirm" | "result" | "search"
 
 type ScreenTone = "default" | "destructive"
 
@@ -86,6 +108,12 @@ export function QrCheckin({
 
   const selectedMember = members.find((m) => m.id === selectedMemberId)
 
+  // Whether this browser holds a trusted-device association for the member
+  // just identified: the "Not you? Report wrong identity" safety action only
+  // makes sense when a device exists (or was just created) and auto-check-in
+  // would otherwise happen again.
+  const deviceInvolved = rememberedMember !== null || rememberDevice
+
   // Repeat scan: the server already resolved a trusted device for this gym, so
   // try the automatic check-in once. A revoked/wrong-gym device falls back to
   // the search flow silently.
@@ -106,14 +134,41 @@ export function QrCheckin({
     })
   }, [isValid, rememberedMember, token, view])
 
-  function useDifferentAccount() {
-    setResult(null)
+  function handleNotYou() {
+    startTransition(async () => {
+      const res = await reportWrongIdentity()
+      if (res.success) {
+        toast.success(
+          res.revoked
+            ? "Your saved device was removed and will no longer auto-check you in."
+            : "No saved device was found on this browser."
+        )
+      } else {
+        toast.error(res.error ?? "Could not remove the device")
+      }
+      setResult(null)
+      setSelectedMemberId(null)
+      setSearch("")
+      setRememberDevice(false)
+      setView("search")
+    })
+  }
+
+  function handleSelectMember(m: Member) {
+    setSelectedMemberId(m.id)
+    setSearch(`${m.firstName} ${m.lastName}`)
+    setRememberDevice(false)
+    setView("confirm")
+  }
+
+  function handleBackToSearch() {
     setSelectedMemberId(null)
     setSearch("")
+    setRememberDevice(false)
     setView("search")
   }
 
-  function handleCheckin() {
+  function handleConfirm() {
     if (!selectedMemberId) return
 
     startTransition(async () => {
@@ -145,8 +200,62 @@ export function QrCheckin({
     return (
       <ResultScreen
         result={result}
-        onDifferentAccount={useDifferentAccount}
+        deviceInvolved={deviceInvolved}
+        onReportWrongIdentity={handleNotYou}
       />
+    )
+  }
+
+  if (view === "confirm" && selectedMember) {
+    const { identity } = selectedMember
+    return (
+      <Screen
+        icon={<ShieldCheck className="size-6 text-primary" />}
+        title={<CardTitle>Confirm your identity</CardTitle>}
+      >
+        <div className="w-full space-y-3 text-left">
+          <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+            <p className="text-muted-foreground">You selected:</p>
+            <p className="font-medium text-foreground">{identity.name}</p>
+            <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+              <div className="flex justify-between gap-3">
+                <dt>Phone</dt>
+                <dd className="tabular-nums">{identity.maskedPhone || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Membership</dt>
+                <dd>{identity.membershipPlanName ?? "No active membership"}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <label className="flex items-start gap-2 text-sm text-muted-foreground">
+            <Checkbox
+              checked={rememberDevice}
+              onCheckedChange={(checked) => setRememberDevice(Boolean(checked))}
+              className="mt-0.5"
+            />
+            <span>
+              Remember this device for faster QR check-ins.
+              <span className="block text-xs text-muted-foreground/70">
+                You&apos;ll be checked in automatically next time. Unchecked by
+                default.
+              </span>
+            </span>
+          </label>
+
+          <Button
+            className="w-full"
+            disabled={isPending}
+            onClick={handleConfirm}
+          >
+            {isPending ? "Checking in..." : "Confirm — This is me"}
+          </Button>
+          <Button variant="outline" className="w-full" onClick={handleBackToSearch}>
+            Go back
+          </Button>
+        </div>
+      </Screen>
     )
   }
 
@@ -162,8 +271,12 @@ export function QrCheckin({
           Scanning your saved device for {rememberedMember?.firstName}{" "}
           {rememberedMember?.lastName ?? ""}.
         </p>
-        <Button variant="outline" onClick={useDifferentAccount}>
-          Not you? Use a different account
+        <Button
+          variant="outline"
+          className="w-full text-destructive"
+          onClick={handleNotYou}
+        >
+          Not you? Report wrong identity
         </Button>
       </Screen>
     )
@@ -176,7 +289,8 @@ export function QrCheckin({
         <>
           <CardTitle>QR Check-in</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Search and select your name to check in.
+            Search and select your name to begin. You&apos;ll be asked to confirm
+            before checking in.
           </p>
         </>
       }
@@ -188,12 +302,6 @@ export function QrCheckin({
           onChange={(e) => setSearch(e.target.value)}
         />
 
-        {selectedMember && (
-          <StatusBadge tone="success">
-            Selected: {selectedMember.firstName} {selectedMember.lastName}
-          </StatusBadge>
-        )}
-
         <div className="max-h-60 overflow-y-auto rounded-lg border">
           {filteredMembers.length === 0 ? (
             <p className="px-3 py-2 text-sm text-muted-foreground">
@@ -204,41 +312,15 @@ export function QrCheckin({
               <button
                 key={m.id}
                 type="button"
-                onClick={() => {
-                  setSelectedMemberId(m.id)
-                  setSearch(`${m.firstName} ${m.lastName}`)
-                }}
-                className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${
-                  selectedMemberId === m.id ? "bg-muted font-medium" : ""
-                }`}
+                onClick={() => handleSelectMember(m)}
+                className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
               >
+                <UserCheck className="mr-2 size-4 text-muted-foreground" />
                 {m.firstName} {m.lastName}
               </button>
             ))
           )}
         </div>
-
-        <label className="flex items-start gap-2 text-sm text-muted-foreground">
-          <Checkbox
-            checked={rememberDevice}
-            onCheckedChange={(checked) => setRememberDevice(Boolean(checked))}
-            className="mt-0.5"
-          />
-          <span>
-            Remember this device for faster QR check-ins.
-            <span className="block text-xs text-muted-foreground/70">
-              You&apos;ll be checked in automatically next time.
-            </span>
-          </span>
-        </label>
-
-        <Button
-          className="w-full"
-          disabled={isPending || !selectedMemberId}
-          onClick={handleCheckin}
-        >
-          {isPending ? "Checking in..." : "Check In"}
-        </Button>
       </div>
     </Screen>
   )
@@ -246,17 +328,23 @@ export function QrCheckin({
 
 function ResultScreen({
   result,
-  onDifferentAccount,
+  deviceInvolved,
+  onReportWrongIdentity,
 }: {
   result: Extract<QrCheckinResult, { success: true }>
-  onDifferentAccount: () => void
+  deviceInvolved: boolean
+  onReportWrongIdentity: () => void
 }) {
   const { outcome, memberName } = result
-  const differentAccountButton = (
-    <Button variant="outline" className="w-full" onClick={onDifferentAccount}>
-      Use a different member
+  const reportButton = deviceInvolved ? (
+    <Button
+      variant="outline"
+      className="w-full text-destructive"
+      onClick={onReportWrongIdentity}
+    >
+      <TriangleAlert className="size-4" /> Not you? Report wrong identity
     </Button>
-  )
+  ) : null
 
   if (outcome === "checked_in") {
     return (
@@ -264,11 +352,11 @@ function ResultScreen({
         icon={<CheckCircle className="size-6 text-emerald-600" />}
         title={<CardTitle>Check-in Successful!</CardTitle>}
       >
-        <p className="text-sm font-medium text-foreground">{memberName}</p>
+        <p className="text-sm font-medium text-foreground">Welcome, {memberName}</p>
         <p className="text-sm text-muted-foreground">
           Your attendance has been recorded. You may close this page.
         </p>
-        {differentAccountButton}
+        {reportButton}
       </Screen>
     )
   }
@@ -279,11 +367,11 @@ function ResultScreen({
         icon={<Clock className="size-6 text-sky-600" />}
         title={<CardTitle>Already Checked In</CardTitle>}
       >
-        <p className="text-sm font-medium text-foreground">{memberName}</p>
+        <p className="text-sm font-medium text-foreground">Welcome, {memberName}</p>
         <p className="text-sm text-muted-foreground">
           Already checked in today. You may close this page.
         </p>
-        {differentAccountButton}
+        {reportButton}
       </Screen>
     )
   }
@@ -300,7 +388,7 @@ function ResultScreen({
           Your membership could not be confirmed for today. Please contact the
           gym reception.
         </p>
-        {differentAccountButton}
+        {reportButton}
       </Screen>
     )
   }
@@ -317,7 +405,7 @@ function ResultScreen({
       <p className="text-sm text-muted-foreground">
         Your attendance request is pending gym approval.
       </p>
-      {differentAccountButton}
+      {reportButton}
     </Screen>
   )
 }

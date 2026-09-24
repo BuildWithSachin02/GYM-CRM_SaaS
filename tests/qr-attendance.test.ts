@@ -2,9 +2,12 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import {
+  buildIdentitySummary,
   dayKeyIsCovered,
   decideAttendanceApproval,
+  decideAttendanceCorrection,
   decideQrScan,
+  maskPhone,
 } from "../src/lib/qr-attendance"
 import type { MemberCoverage } from "../src/lib/memberships"
 
@@ -126,4 +129,126 @@ test("approval gate: a still-expired membership blocks approval explicitly", () 
     decideAttendanceApproval({ requestStatus: "PENDING", memberActive: true, requestDayCovered: false }),
     { allowed: false, reason: "still_expired" }
   )
+})
+
+// ---------------------------------------------------------------------------
+// decideAttendanceCorrection — staff correction gate
+// ---------------------------------------------------------------------------
+
+test("correction gate: only a real cross-member reassignment is allowed", () => {
+  const base = {
+    checkInExists: true,
+    sameMember: false,
+    linkedToRequest: false,
+    targetMemberValid: true,
+    targetHasCheckInOnDay: false,
+  }
+  assert.deepEqual(decideAttendanceCorrection(base), { allowed: true })
+})
+
+test("correction gate: a missing check-in is never corrected", () => {
+  assert.deepEqual(
+    decideAttendanceCorrection({
+      checkInExists: false,
+      sameMember: false,
+      linkedToRequest: false,
+      targetMemberValid: true,
+      targetHasCheckInOnDay: false,
+    }),
+    { allowed: false, reason: "not_found" }
+  )
+})
+
+test("correction gate: reassigning to the same member is a no-op and blocked", () => {
+  assert.deepEqual(
+    decideAttendanceCorrection({
+      checkInExists: true,
+      sameMember: true,
+      linkedToRequest: false,
+      targetMemberValid: true,
+      targetHasCheckInOnDay: false,
+    }),
+    { allowed: false, reason: "no_change" }
+  )
+})
+
+test("correction gate: approved-request check-ins are never reassigned", () => {
+  assert.deepEqual(
+    decideAttendanceCorrection({
+      checkInExists: true,
+      sameMember: false,
+      linkedToRequest: true,
+      targetMemberValid: true,
+      targetHasCheckInOnDay: false,
+    }),
+    { allowed: false, reason: "linked_to_request" }
+  )
+})
+
+test("correction gate: an invalid target member blocks the correction", () => {
+  assert.deepEqual(
+    decideAttendanceCorrection({
+      checkInExists: true,
+      sameMember: false,
+      linkedToRequest: false,
+      targetMemberValid: false,
+      targetHasCheckInOnDay: false,
+    }),
+    { allowed: false, reason: "member_invalid" }
+  )
+})
+
+test("correction gate: the target member's own check-in on the day blocks duplicates", () => {
+  assert.deepEqual(
+    decideAttendanceCorrection({
+      checkInExists: true,
+      sameMember: false,
+      linkedToRequest: false,
+      targetMemberValid: true,
+      targetHasCheckInOnDay: true,
+    }),
+    { allowed: false, reason: "duplicate_day" }
+  )
+})
+
+// ---------------------------------------------------------------------------
+// maskPhone + buildIdentitySummary — identity confirmation screen
+// ---------------------------------------------------------------------------
+
+test("maskPhone exposes only the last four digits", () => {
+  assert.equal(maskPhone("+91 98765 43210"), "******3210")
+  assert.equal(maskPhone("9876543210"), "******3210")
+  assert.equal(maskPhone("100"), "******100") // shorter numbers still reveal only the tail
+})
+
+test("maskPhone tolerates missing / non-numeric input", () => {
+  assert.equal(maskPhone(null), "")
+  assert.equal(maskPhone(undefined), "")
+  assert.equal(maskPhone(""), "")
+  assert.equal(maskPhone("+ ( ) -"), "")
+})
+
+test("buildIdentitySummary joins the name, masks the phone, keeps plan optional", () => {
+  const summary = buildIdentitySummary({
+    firstName: "Aarav",
+    lastName: "Sharma",
+    phone: "+91 98765 43210",
+    membershipPlanName: "Gold Monthly",
+  })
+  assert.deepEqual(summary, {
+    name: "Aarav Sharma",
+    maskedPhone: "******3210",
+    membershipPlanName: "Gold Monthly",
+  })
+
+  const noPlan = buildIdentitySummary({
+    firstName: "Neha",
+    lastName: "Kapoor",
+    phone: null,
+  })
+  assert.deepEqual(noPlan, {
+    name: "Neha Kapoor",
+    maskedPhone: "",
+    membershipPlanName: null,
+  })
 })

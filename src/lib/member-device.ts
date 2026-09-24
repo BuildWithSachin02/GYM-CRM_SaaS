@@ -154,3 +154,45 @@ export async function touchDevice(deviceId: string): Promise<void> {
     data: { lastUsedAt: new Date() },
   })
 }
+
+/** Clear the device cookie (e.g. after a wrong-identity report). */
+export async function clearDeviceCookie(): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.set(DEVICE_COOKIE, "", { ...deviceCookieOptions(), maxAge: 0 })
+}
+
+/**
+ * Revoke the device identified by the current browser cookie.
+ *
+ * Idempotent and tenant-agnostic on purpose: the caller's own cookie can only
+ * ever address ITS OWN device row (token_hash is unique), so no organization
+ * input is ever trusted. Returns the revoked device's ids so the caller can
+ * audit with the correct tenant context; both are null when no device exists.
+ */
+export async function revokeCurrentDevice(): Promise<{
+  revoked: boolean
+  deviceId: string | null
+  organizationId: string | null
+}> {
+  const token = await readDeviceToken()
+  if (!token) return { revoked: false, deviceId: null, organizationId: null }
+
+  const tokenHash = hashDeviceToken(token)
+  const device = await prisma.memberDevice.findUnique({
+    where: { tokenHash },
+    select: { id: true, organizationId: true, revokedAt: true },
+  })
+  if (device && !device.revokedAt) {
+    await prisma.memberDevice.update({
+      where: { id: device.id },
+      data: { revokedAt: new Date() },
+    })
+  }
+  await clearDeviceCookie()
+
+  return {
+    revoked: true,
+    deviceId: device?.id ?? null,
+    organizationId: device?.organizationId ?? null,
+  }
+}

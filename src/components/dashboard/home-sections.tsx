@@ -102,7 +102,7 @@ export async function HomeStatsSection({
   )
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
         label="Total Members"
         value={s.totalMembers}
@@ -580,7 +580,7 @@ export async function HomeActivitySection({
 
 export function HomeStatsSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="rounded-xl border p-5">
           <Skeleton className="h-4 w-24" />

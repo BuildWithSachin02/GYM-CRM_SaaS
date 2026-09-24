@@ -3,7 +3,13 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, BarChart3, CalendarCheck, CalendarRange } from "lucide-react"
+import {
+  ArrowLeft,
+  BarChart3,
+  CalendarCheck,
+  CalendarRange,
+  PenLine,
+} from "lucide-react"
 
 import { formatDayKey, formatTimeInZone } from "@/lib/format"
 
@@ -17,6 +23,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  AttendanceCorrectionDialog,
+  type CorrectionMember,
+} from "@/components/attendance/attendance-correction-dialog"
 import {
   Table,
   TableBody,
@@ -72,6 +82,10 @@ type MemberAttendancePageProps = {
   totalPages: number
   page: number
   pageSize: number
+  /** Staff may correct a wrongly-attributed QR check-in (OWNER/ADMIN + permission). */
+  canCorrect?: boolean
+  /** Org-scoped ACTIVE members to pick from when correcting (excludes this member). */
+  correctMembers?: CorrectionMember[]
 }
 
 const RANGE_LABELS: Record<string, string> = {
@@ -102,6 +116,8 @@ export function MemberAttendancePage({
   totalPages,
   page,
   pageSize,
+  canCorrect = false,
+  correctMembers = [],
 }: MemberAttendancePageProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -286,6 +302,11 @@ export function MemberAttendancePage({
                   <TableHead>Check-in time</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Location</TableHead>
+                  {canCorrect && (
+                    <TableHead className="w-24 text-right text-muted-foreground">
+                      Actions
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -308,6 +329,24 @@ export function MemberAttendancePage({
                     <TableCell className="text-muted-foreground">
                       {c.locationName ?? "—"}
                     </TableCell>
+                    {canCorrect && (
+                      <TableCell className="text-right">
+                        {c.source === "QR_SESSION" ? (
+                          <AttendanceCorrectionDialog
+                            checkInId={c.id}
+                            dayKey={c.dayKey}
+                            candidates={correctMembers}
+                            trigger={
+                              <Button variant="ghost" size="sm">
+                                <PenLine className="size-3.5" /> Correct
+                              </Button>
+                            }
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

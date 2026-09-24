@@ -8,9 +8,9 @@ import { requireUserOrThrow } from "@/lib/auth/auth"
 import { can } from "@/lib/permissions"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { dayKeyInTimeZone, getMemberCoverage } from "@/lib/memberships"
-import { dayKeyIsCovered, decideAttendanceApproval } from "@/lib/qr-attendance"
-import { attendanceRequestDecisionSchema } from "@/lib/validators"
-import type { AttendanceRequestDecisionInput } from "@/lib/validators"
+import { dayKeyIsCovered, decideAttendanceApproval, decideAttendanceCorrection } from "@/lib/qr-attendance"
+import { attendanceRequestDecisionSchema, attendanceCorrectionSchema } from "@/lib/validators"
+import type { AttendanceRequestDecisionInput, AttendanceCorrectionInput } from "@/lib/validators"
 
 type ActionResult = { success: boolean; error?: string }
 
@@ -250,4 +250,117 @@ async function markNotificationsRead(userId: string): Promise<void> {
     where: { userId, type: "ATTENDANCE_REQUEST", isRead: false },
     data: { isRead: true },
   })
+}
+
+const CORRECTION_MESSAGES = {
+  not_found: "Check-in not found",
+  no_change: "Attendance already belongs to the selected member",
+  linked_to_request:
+    "This check-in was created from an approved attendance request and cannot be reassigned",
+  member_invalid: "Selected member is not valid in this organization",
+  duplicate_day: "The selected member already has a check-in for this day",
+} as const
+
+/**
+ * Correct an incorrectly attributed check-in (e.g. a member was checked in
+ * under the wrong name via QR). OWNER/ADMIN only.
+ *
+ * The existing CheckIn row is REASSIGNED to the correct member — never deleted,
+ * never duplicated — so the unique (org, member, day) rule keeps duplicates
+ * blocked and reports/history recompute naturally. Revalidates everything
+ * server-side: same organization, valid member, and no existing check-in for
+ * the target member on the original day. Every correction is audited.
+ */
+export async function correctAttendanceMember(
+  input: AttendanceCorrectionInput
+): Promise<ActionResult> {
+  const user = await requireUserOrThrow()
+  if (!can(user, "attendance:record") || !["OWNER", "ADMIN"].includes(user.role)) {
+    return { success: false, error: "Not authorized" }
+  }
+
+  const parsed = attendanceCorrectionSchema.safeParse(input)
+  if (!parsed.success) return { success: false, error: "Invalid correction" }
+
+  const checkIn = await prisma.checkIn.findFirst({
+    where: { id: parsed.data.checkInId, organizationId: user.organizationId },
+    select: {
+      id: true,
+      memberId: true,
+      dayKey: true,
+      source: true,
+      attendanceRequest: { select: { id: true } },
+    },
+  })
+  if (!checkIn) return { success: false, error: CORRECTION_MESSAGES.not_found }
+
+  const target = await prisma.member.findFirst({
+    where: {
+      id: parsed.data.memberId,
+      organizationId: user.organizationId,
+      deletedAt: null,
+    },
+    select: { id: true, firstName: true, lastName: true },
+  })
+
+  const targetDayCheckIn = target
+    ? await prisma.checkIn.findUnique({
+        where: {
+          organizationId_memberId_dayKey: {
+            organizationId: user.organizationId,
+            memberId: target.id,
+            dayKey: checkIn.dayKey,
+          },
+        },
+        select: { id: true },
+      })
+    : null
+
+  const gate = decideAttendanceCorrection({
+    checkInExists: true,
+    sameMember: checkIn.memberId === parsed.data.memberId,
+    linkedToRequest: checkIn.attendanceRequest !== null,
+    targetMemberValid: target !== null,
+    targetHasCheckInOnDay: targetDayCheckIn !== null,
+  })
+  if (!gate.allowed) return { success: false, error: CORRECTION_MESSAGES[gate.reason] }
+  if (!target) return { success: false, error: CORRECTION_MESSAGES.member_invalid }
+
+  const targetName = `${target.firstName} ${target.lastName}`
+
+  try {
+    await prisma.checkIn.update({
+      where: { id: checkIn.id },
+      data: { memberId: target.id },
+    })
+  } catch (error) {
+    // Defense in depth: the (org, member, day) unique index can never allow a
+    // duplicate, even if a concurrent scan raced the pre-check above.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { success: false, error: CORRECTION_MESSAGES.duplicate_day }
+    }
+    throw error
+  }
+
+  await writeAudit({
+    organizationId: user.organizationId,
+    actorUserId: user.id,
+    action: AUDIT_ACTIONS.CHECKIN_MEMBER_CORRECTED,
+    entityType: "CheckIn",
+    entityId: checkIn.id,
+    before: { memberId: checkIn.memberId, dayKey: checkIn.dayKey, source: checkIn.source },
+    after: {
+      memberId: target.id,
+      memberName: targetName,
+      dayKey: checkIn.dayKey,
+      reason: parsed.data.reason,
+    },
+  })
+
+  revalidatePath("/dashboard/attendance")
+  revalidatePath(`/dashboard/members/${checkIn.memberId}`)
+  revalidatePath(`/dashboard/members/${checkIn.memberId}/attendance`)
+  revalidatePath(`/dashboard/members/${target.id}`)
+  revalidatePath(`/dashboard/members/${target.id}/attendance`)
+  return { success: true }
 }

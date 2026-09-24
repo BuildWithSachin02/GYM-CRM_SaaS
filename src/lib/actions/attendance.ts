@@ -14,6 +14,7 @@ import { decideQrScan } from "@/lib/qr-attendance"
 import {
   rememberDevice,
   resolveDeviceMember,
+  revokeCurrentDevice,
   touchDevice,
   type ResolvedDeviceMember,
 } from "@/lib/member-device"
@@ -492,4 +493,34 @@ export async function autoQrCheckin(token: string): Promise<QrCheckinResult> {
   if (!member) return { success: false, error: "", code: "device_not_found" }
 
   return performQrScan({ session, member, rememberDevice: false, device })
+}
+
+/**
+ * "Not you?" safety action. A member reports that the trusted device is bound
+ * to the wrong person. This:
+ *   - revokes ONLY the current device (identified from the browser cookie)
+ *   - NEVER creates attendance, NEVER transfers an attendance to another member
+ *   - clears the cookie so the very next scan falls back to member search
+ * Already-recorded wrong check-ins are never silently changed here — the
+ * member notifies reception and staff corrects them via correctAttendanceMember
+ * (with an audit trail). Re-enrollment requires a fresh explicit selection +
+ * identity confirmation.
+ */
+export async function reportWrongIdentity(): Promise<
+  ActionResult & { revoked: boolean }
+> {
+  const { revoked, deviceId, organizationId } = await revokeCurrentDevice()
+
+  if (revoked && organizationId) {
+    await writeAudit({
+      organizationId,
+      actorUserId: null,
+      action: AUDIT_ACTIONS.DEVICE_REVOKED,
+      entityType: "MemberDevice",
+      entityId: deviceId,
+      after: { reason: "member_wrong_identity" },
+    })
+  }
+
+  return { success: true, revoked }
 }
