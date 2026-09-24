@@ -66,3 +66,39 @@ See `DATABASE_DESIGN.md` §4.11:
 ## 8. Compatibility with the tenant model
 
 QRSession and CheckIn both carry `organization_id` and are reachable only through the tenant-scoped data layer, exactly like members, memberships, and payments. This keeps attendance on the same isolation boundary as the rest of the product.
+
+## 9. Trusted devices (faster repeat check-ins)
+
+To avoid re-searching the member list on every scan, a browser can *remember* the member who just checked in:
+
+- The member **explicitly opts in** via the "Remember this device for faster QR check-ins." checkbox on the check-in screen — the box is **unchecked by default**, and a device is never associated implicitly.
+- A random 32-byte **token** is generated; only its SHA-256 **hash** is stored in `MemberDevice` (`token_hash` unique). The raw token lives only in a secure, HttpOnly cookie (`gym_device`, path `/attendance/qr`, 60-day max age, SameSite=Lax, Secure in production). The cookie **never encodes the memberId or organizationId**.
+- A device is **identification convenience only**. It never bypasses a single server-side check; every scan — remembered or not — re-validates the QR session, tenancy, member status, duplicate rules and membership coverage. Both paths converge on the same decision (`decideQrScan` in `src/lib/qr-attendance.ts`).
+- Revocation: at most 3 active devices per member (oldest auto-revoked on overflow). Staff can revoke any device from the member profile; the member may then simply check in again via search. A revoked/missing/other-gym device makes the scan **silently fall back to the member-search flow**.
+- Device rows cascade-delete with their member (no orphaned hashes survive a member reset). See `DATABASE_DESIGN.md`.
+
+## 10. Expired membership → pending attendance request
+
+When the member's membership does not cover the scan day (EXPIRED / CANCELLED / PAUSED / UPCOMING / none), no CheckIn is created. Instead:
+
+1. A **PENDING `AttendanceRequest`** is created (at most one per member per org-timezone day via a unique key). It records the original day, the QR session, and the requested-at instant.
+2. The member sees *"Your membership has expired. Please contact the gym reception."* and *"Your attendance request is pending gym approval."*, and is **not** blocked from a future legitimate scan.
+3. Every active **OWNER/ADMIN** receives an in-app notification (`NotificationType.ATTENDANCE_REQUEST`, link to `/dashboard/attendance/requests`), reusing the existing Notification inbox. Notifications are staff-facing only — member-facing push/WhatsApp delivery is out of scope (see `PRODUCT_REQUIREMENTS.md`).
+4. Acting staff open **Attendance Requests** to approve or reject.
+
+**Approval** converts the request into a normal completed `CheckIn` (same `dayKey`, original `requestedAt` as the check-in time, source `QR_SESSION`) — never a separate `PENDING` state on CheckIn. Approval **re-validates everything server-side**: still pending, member still active, no existing check-in for that day, and the *current* membership coverage must genuinely include the **original request day**. A still-expired membership is rejected with *"Membership is still expired. Renew the membership before approving this attendance."* — so the owner renews the membership first, then approves. An outstanding balance never blocks approval.
+
+**Rejection** records an optional staff reason and leaves the status REJECTED; the member's next scan on a covered day works normally (and a repeat scan of an already-rejected request signals "check-in not approved").
+
+## 11. Result outcomes of a scan
+
+A scan resolves to exactly one of (see `QrScanPlan` / `QrCheckinResult`):
+
+| Outcome | Meaning |
+| --- | --- |
+| `member_not_active` | member record not ACTIVE — never recorded, no request |
+| `already_checked_in` | duplicate for the (member, org-day) — idempotent reply |
+| `check_in` | membership covers today → normal `CheckIn` |
+| `request_attendance` | no coverage today → `PENDING` request + staff notification |
+
+Memory device auto-check-in returns the same outcomes; a missing/revoked/wrong-gym device returns `code: "device_not_found"` so the UI silently restores the member-search flow.

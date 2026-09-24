@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CalendarCheck, QrCode, UserCheck } from "lucide-react"
+import { CalendarCheck, QrCode, TriangleAlert, UserCheck } from "lucide-react"
 
 import { formatTime } from "@/lib/format"
 import { StatusBadge } from "@/components/common/status-badge"
@@ -48,6 +48,7 @@ type AttendancePageProps = {
   members: Member[]
   locations: Location[]
   canRecord: boolean
+  pendingRequests?: number
 }
 
 export function AttendancePage({
@@ -60,6 +61,7 @@ export function AttendancePage({
   members,
   locations,
   canRecord,
+  pendingRequests = 0,
 }: AttendancePageProps) {
   const [showQrSection, setShowQrSection] = useState(false)
 
@@ -99,6 +101,23 @@ export function AttendancePage({
           ) : undefined
         }
       />
+
+      {pendingRequests > 0 && (
+        <div className="flex flex-col items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <TriangleAlert className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <p className="text-sm text-amber-900">
+              <span className="font-medium">
+                {pendingRequests} attendance request{pendingRequests === 1 ? "" : "s"}
+              </span>{" "}
+              from members with an expired membership are awaiting your review.
+            </p>
+          </div>
+          <Button variant="outline" render={<Link href="/dashboard/attendance/requests" />}>
+            Review requests
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

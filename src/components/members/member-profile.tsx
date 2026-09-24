@@ -16,6 +16,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Smartphone,
   Trash2,
   UserCircle,
   Zap,
@@ -30,6 +31,7 @@ import type { MembershipLifecycleStatus } from "@/lib/memberships"
 import type { OutstandingStatus } from "@/lib/outstanding"
 
 import { archiveMember } from "@/lib/actions/members"
+import { revokeMemberDevice } from "@/lib/actions/attendance-requests"
 import { PageHeader } from "@/components/common/page-header"
 import { StatusBadge } from "@/components/common/status-badge"
 import { MemberAttendanceSummary } from "@/components/attendance/member-attendance-summary"
@@ -168,6 +170,14 @@ type MemberProfileProps = {
     coverageThroughKey: string | null
     renewedThrough: boolean
   } | null
+  /** Trusted devices the member can use for QR identification. */
+  devices: {
+    id: string
+    lastUsedAt: string
+    createdAt: string
+    revokedAt: string | null
+  }[]
+  canManageDevices: boolean
 }
 
 export function MemberProfile({
@@ -182,6 +192,8 @@ export function MemberProfile({
   plans,
   todayKey,
   renewal,
+  devices,
+  canManageDevices,
 }: MemberProfileProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -208,6 +220,18 @@ export function MemberProfile({
         toast.error(result.error)
       }
       setShowArchiveConfirm(false)
+    })
+  }
+
+  function handleRevokeDevice(deviceId: string) {
+    startTransition(async () => {
+      const result = await revokeMemberDevice(deviceId)
+      if (result.success) {
+        toast.success("Device revoked — it will no longer auto check in")
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
     })
   }
 
@@ -546,6 +570,56 @@ export function MemberProfile({
                 <span className="text-muted-foreground">Last Updated</span>
                 <span className="text-muted-foreground">{formatDateTime(member.updatedAt)}</span>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Smartphone className="size-4" /> QR Access
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Devices this member opted to remember for faster QR check-ins.
+                Remembering a device is identification only — every scan still
+                validates membership server-side.
+              </p>
+              {devices.length === 0 ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  No trusted devices yet.
+                </p>
+              ) : (
+                devices.map((device) => {
+                  const revoked = device.revokedAt !== null
+                  return (
+                    <div
+                      key={device.id}
+                      className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 p-2"
+                    >
+                      <div className="min-w-0 space-y-0.5 text-xs">
+                        <p className="font-medium text-foreground">
+                          {revoked ? "Revoked device" : "Trusted device"}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Remembered {formatDate(device.createdAt)} · Last used{" "}
+                          {formatDateTime(device.lastUsedAt)}
+                        </p>
+                      </div>
+                      {canManageDevices && !revoked && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => handleRevokeDevice(device.id)}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })
+              )}
             </CardContent>
           </Card>
 

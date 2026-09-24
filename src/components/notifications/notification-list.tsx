@@ -40,6 +40,7 @@ const NOTIFICATION_TYPES: Record<NotificationType, { label: string }> = {
   APPOINTMENT_REMINDER: { label: "Appointment reminder" },
   PAYMENT_RECORDED: { label: "Payment recorded" },
   LEAD_CONVERTED: { label: "Lead converted" },
+  ATTENDANCE_REQUEST: { label: "Attendance request" },
 }
 
 export function NotificationList({ notifications }: NotificationListProps) {

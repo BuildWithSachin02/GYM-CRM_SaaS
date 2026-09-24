@@ -124,6 +124,12 @@ export default async function MemberDetailPage({ params }: PageProps) {
     select: { id: true, name: true, priceMinor: true, durationDays: true },
   })
 
+  const devices = await prisma.memberDevice.findMany({
+    where: { organizationId: user.organizationId, memberId: member.id },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, createdAt: true, lastUsedAt: true, revokedAt: true },
+  })
+
   const attendanceOverview = await getMemberAttendanceOverview(
     user.organizationId,
     member.id,
@@ -262,6 +268,13 @@ export default async function MemberDetailPage({ params }: PageProps) {
       plans={plans}
       todayKey={todayKey}
       renewal={renewalContext}
+      devices={devices.map((d) => ({
+        id: d.id,
+        createdAt: d.createdAt.toISOString(),
+        lastUsedAt: d.lastUsedAt.toISOString(),
+        revokedAt: d.revokedAt?.toISOString() ?? null,
+      }))}
+      canManageDevices={can(user, "members:update")}
     />
   )
 }

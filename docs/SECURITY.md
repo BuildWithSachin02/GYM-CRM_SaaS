@@ -49,6 +49,8 @@ Prioritized flow and requirements live in `QR_ATTENDANCE.md`. Security-relevant 
 - Only a **token hash** may be stored; never the raw token.
 - Tokens expire and can be revoked.
 - Check-in binds to the token issuer, member, location, and timestamp; duplicate scans rejected.
+- **Trusted devices** (`MemberDevice`) are identification-only conveniences: the raw 32-byte device token lives only in an HttpOnly cookie and only its SHA-256 hash is stored; the cookie carries no member/org ID; devices are opt-in, capped, and revocable; every scan still re-validates tenancy, QR validity, membership coverage and duplicate rules server-side. See `QR_ATTENDANCE.md` §9-11.
+- **Expired-membership scans** create a PENDING `AttendanceRequest` (reviewed/approved by staff) rather than a silent denial or a non-approved check-in; approval reconditions membership coverage on the original request day. See `QR_ATTENDANCE.md` §10.
 
 ## 6. Payments security
 

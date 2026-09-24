@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 
 import { prisma } from "@/lib/prisma"
+import { resolveDeviceMember } from "@/lib/member-device"
 
 import { QrCheckin } from "@/components/attendance/qr-checkin"
 
@@ -46,5 +47,25 @@ export default async function QrTokenPage({ params }: QrTokenPageProps) {
     orderBy: { firstName: "asc" },
   })
 
-  return <QrCheckin token={token} isValid={true} members={members} />
+  // Trusted device present and, crucially, belonging to the SAME gym as this
+  // QR? Auto-check-in it. Anything else (other gym, revoked, inactive member)
+  // silently renders the ordinary member-search screen instead.
+  const device = await resolveDeviceMember()
+  const rememberedMember =
+    device && device.organizationId === session.organizationId
+      ? {
+          id: device.memberId,
+          firstName: device.firstName,
+          lastName: device.lastName,
+        }
+      : null
+
+  return (
+    <QrCheckin
+      token={token}
+      isValid={true}
+      members={members}
+      rememberedMember={rememberedMember}
+    />
+  )
 }

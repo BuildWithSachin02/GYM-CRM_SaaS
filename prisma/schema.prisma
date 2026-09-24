@@ -81,6 +81,12 @@ enum AttendanceSource {
   QR_SESSION
 }
 
+enum AttendanceRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum LeadStage {
   NEW
   CONTACTED
@@ -131,6 +137,7 @@ enum NotificationType {
   APPOINTMENT_REMINDER
   PAYMENT_RECORDED
   LEAD_CONVERTED
+  ATTENDANCE_REQUEST
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +173,11 @@ model Organization {
   leads          Lead[]
   leadActivities LeadActivity[]
   appointments   Appointment[]
-  tasks          Task[]
-  notifications  Notification[]
-  auditLogs      AuditLog[]
+  tasks              Task[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  attendanceRequests AttendanceRequest[]
+  memberDevices      MemberDevice[]
 
   @@index([status])
 }
@@ -220,10 +229,12 @@ model User {
   ownedLeads        Lead[]         @relation("OwnedLeads")
   staffAppointments Appointment[]  @relation("StaffAppointments")
   assignedTasks     Task[]         @relation("TaskAssignee")
-  createdTasks      Task[]         @relation("TaskCreator")
-  leadActivities    LeadActivity[]
-  notifications     Notification[]
-  auditLogs         AuditLog[]
+  createdTasks              Task[]               @relation("TaskCreator")
+  leadActivities            LeadActivity[]
+  notifications             Notification[]
+  auditLogs                 AuditLog[]
+  approvedAttendanceRequests AttendanceRequest[]  @relation("ApprovedAttendanceRequests")
+  rejectedAttendanceRequests AttendanceRequest[]  @relation("RejectedAttendanceRequests")
 
   @@index([organizationId])
   @@index([organizationId, role])
@@ -288,6 +299,8 @@ model Member {
   convertedLeads Lead[]
   tasks          Task[]        @relation("TaskMember")
   appointments   Appointment[]
+  attendanceRequests AttendanceRequest[]
+  memberDevices  MemberDevice[]
 
   @@unique([organizationId, email])
   @@unique([organizationId, phone])
@@ -417,6 +430,8 @@ model CheckIn {
   checkedInAt    DateTime         @default(now())
   createdAt      DateTime         @default(now())
 
+  attendanceRequest AttendanceRequest?
+
   @@unique([organizationId, memberId, dayKey])
   @@index([organizationId])
   @@index([organizationId, memberId])
@@ -441,10 +456,82 @@ model QRSession {
   createdAt      DateTime     @default(now())
 
   checkIns CheckIn[]
+  attendanceRequests AttendanceRequest[]
 
   @@index([organizationId])
   @@index([organizationId, expiresAt])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Trusted devices (QR attendance convenience) — NOT authorization
+// ---------------------------------------------------------------------------
+
+model MemberDevice {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberId       String
+  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  // SHA-256 hex digest of the raw cookie token. The raw token lives only in the
+  // browser's secure HttpOnly cookie (path=/attendance/qr); the server never
+  // stores it, never logs it, and never exports it.
+  tokenHash      String   @unique
+  lastUsedAt     DateTime @default(now()) @updatedAt
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, memberId])
+  @@index([organizationId, revokedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Pending QR attendance requests (PENDING/APPROVED/REJECTED)
+//
+// A request is NEVER a completed check-in. It is only the reviewable record of
+// a member scanning a valid QR while their membership does not cover the scan
+// day because of a genuine business state: EXPIRED / CANCELLED / PAUSED /
+// UPCOMING membership, or a future start. An APPROVED request is converted
+// into a real CheckIn (checkedInAt = the original requestedAt, dayKey = the
+// original attempt day) so reports/analytics keep reading only CheckIn rows.
+//
+// Member-device identification is only a convenience: the same server-side
+// membership/eligibility validation runs on EVERY scan, remembered or not.
+// ---------------------------------------------------------------------------
+
+model AttendanceRequest {
+  id              String                  @id @default(uuid())
+  organizationId  String
+  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberId        String
+  member          Member                  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  qrSessionId     String?
+  qrSession       QRSession?              @relation(fields: [qrSessionId], references: [id], onDelete: SetNull)
+  source          AttendanceSource        @default(QR_SESSION)
+  status          AttendanceRequestStatus @default(PENDING)
+  dayKey          String // YYYY-MM-DD of the attempt, in the org's timezone
+  requestedAt     DateTime                @default(now())
+  approvedAt      DateTime?
+  approvedById    String?
+  approvedBy      User?                   @relation("ApprovedAttendanceRequests", fields: [approvedById], references: [id], onDelete: SetNull)
+  rejectedAt      DateTime?
+  rejectedById    String?
+  rejectedBy      User?                   @relation("RejectedAttendanceRequests", fields: [rejectedById], references: [id], onDelete: SetNull)
+  rejectionReason String?
+  checkInId       String?                 @unique
+  checkIn         CheckIn?                @relation(fields: [checkInId], references: [id], onDelete: SetNull)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  // Anti-spam: at most ONE attendance request per member per org-local day,
+  // regardless of status. Repeated scans of the same member face the record
+  // that already exists instead of stacking duplicate requests.
+  @@unique([organizationId, memberId, dayKey])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, memberId])
+  @@index([organizationId, requestedAt])
 }
 
 // ---------------------------------------------------------------------------

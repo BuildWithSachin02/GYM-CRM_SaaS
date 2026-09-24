@@ -319,6 +319,26 @@ export type QrSessionInput = z.infer<typeof qrSessionSchema>
 
 // ---------------------------------------------------------------------------
 
+export const qrCheckinSchema = z.object({
+  token: z.string().trim().min(8, "Invalid QR code").max(500, "Invalid QR code"),
+  memberId: z.string().uuid("Invalid member"),
+  // Explicit member opt-in only — a device is never remembered implicitly.
+  rememberDevice: z.boolean().optional().default(false),
+})
+
+export type QrCheckinInput = z.infer<typeof qrCheckinSchema>
+
+// ---------------------------------------------------------------------------
+
+export const attendanceRequestDecisionSchema = z.object({
+  requestId: z.string().uuid("Invalid request"),
+  reason: optionalText(500),
+})
+
+export type AttendanceRequestDecisionInput = z.input<typeof attendanceRequestDecisionSchema>
+
+// ---------------------------------------------------------------------------
+
 /**
  * A valid, real calendar day key (YYYY-MM-DD) for the org-timezone date
  * filters. Rejects malformed and impossible dates before they hit a query.

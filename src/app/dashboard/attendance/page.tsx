@@ -31,7 +31,7 @@ export default async function AttendanceRoute({
   const pageSize = 100
   const skip = (page - 1) * pageSize
 
-  const [checkins, totalCount, activeQrSessions, members, locations] =
+  const [checkins, totalCount, activeQrSessions, members, locations, pendingRequests] =
     await Promise.all([
       prisma.checkIn.findMany({
         where: {
@@ -78,6 +78,12 @@ export default async function AttendanceRoute({
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
+      prisma.attendanceRequest.count({
+        where: {
+          organizationId: user.organizationId,
+          status: "PENDING",
+        },
+      }),
     ])
 
   const serializedCheckins = checkins.map((c) => ({
@@ -108,6 +114,7 @@ export default async function AttendanceRoute({
       members={members}
       locations={locations}
       canRecord={can(user, "attendance:record")}
+      pendingRequests={pendingRequests}
     />
   )
 }
