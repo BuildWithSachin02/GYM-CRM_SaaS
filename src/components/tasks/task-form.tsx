@@ -55,7 +55,7 @@ const taskFormSchema = z.object({
 type TaskFormValues = z.infer<typeof taskFormSchema>
 
 type TaskFormProps = {
-  members: { id: string; name: string }[]
+  members: { id: string; name: string; memberCode?: string | null }[]
   leads: { id: string; name: string }[]
   assignees?: { id: string; name: string }[]
   trigger?: React.ReactNode
@@ -228,7 +228,10 @@ export function TaskForm({ members, leads, assignees = [], trigger }: TaskFormPr
                       <EntityCombobox
                         value={field.value ?? ""}
                         onValueChange={(v) => field.onChange(v || "")}
-                        options={members.map((m) => ({ id: m.id, label: m.name }))}
+                        options={members.map((m) => ({
+                          id: m.id,
+                          label: m.memberCode ? `${m.name} / ${m.memberCode}` : m.name,
+                        }))}
                         placeholder="None"
                         emptyText="No members found."
                         allowClear

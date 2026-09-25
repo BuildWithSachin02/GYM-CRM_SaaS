@@ -5,6 +5,10 @@ import {
   DATA_CATEGORY_ORDER,
   RESET_SELECTABLE_CATEGORIES,
 } from "@/lib/data-catalog"
+import { PERMISSION_VALUES } from "@/lib/permissions"
+import { USERNAME_MAX, USERNAME_MIN, USERNAME_RE } from "@/lib/user-access"
+
+const USERNAME_MSG = `Usernames must be ${USERNAME_MIN}-${USERNAME_MAX} characters using letters, numbers, dots, underscores or hyphens`
 
 const requiredText = (min = 1, max = 200) =>
   z.string().trim().min(min, "Required").max(max, `Max ${max} characters`)
@@ -258,28 +262,102 @@ export type TaskStatusInput = z.infer<typeof taskStatusSchema>
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A record of permission-key → granted boolean. Keys are validated against the
+ * catalog so unknown client-provided strings are rejected before any DB write.
+ */
+const permissionsRecord = () =>
+  z
+    .record(z.string(), z.boolean(), { message: "Invalid permissions" })
+    .refine(
+      (v) =>
+        Object.keys(v).every((key) =>
+          (PERMISSION_VALUES as readonly string[]).includes(key)
+        ),
+      { message: "Unknown permission" }
+    )
+
 export const staffSchema = z.object({
   name: requiredText(1, 120),
   email: email(),
   phone: optionalPhone(),
   role: z.enum(["OWNER", "ADMIN", "RECEPTIONIST", "TRAINER"] as const),
   password: z.string().min(8, "Password must be at least 8 characters"),
+  username: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(USERNAME_RE, USERNAME_MSG)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null)),
+  /**
+   * Optional per-user access customization applied at creation time.
+   *
+   * Semantics: the selected role's default permissions are the baseline and the
+   * provided map is the FULL desired effective set (missing keys fall back to
+   * the role default). Stored as UserPermission override rows exactly like the
+   * permission editor, so stored writes always use one representation.
+   */
+  permissions: permissionsRecord().optional(),
 })
 
 export type StaffInput = z.infer<typeof staffSchema>
 
-export const staffUpdateSchema = z.object({
+export const staffUpdateSchema = z
+  .object({
+    staffId: z.string().uuid("Invalid staff"),
+    name: requiredText(1, 120),
+    phone: optionalPhone(),
+    role: z.enum(["OWNER", "ADMIN", "RECEPTIONIST", "TRAINER"] as const),
+    status: z.enum(["ACTIVE", "DEACTIVATED"] as const),
+    username: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(USERNAME_RE, USERNAME_MSG)
+      .optional()
+      .nullable()
+      .transform((v) => (v ? v : null)),
+  })
+  // Strict on purpose: passwords are NEVER edited through this schema — any
+  // attempt to smuggle a password field in (even a null one) is rejected.
+  // Password changes/resets go through changePasswordSchema / resetPasswordSchema
+  // in src/lib/actions/users.ts.
+  .strict()
+// Passwords are deliberately NOT part of ordinary user editing. Password
+// changes/resets go through the dedicated secure actions (changeOwnPassword /
+// resetPassword in src/lib/actions/users.ts).
+export type StaffUpdateInput = z.infer<typeof staffUpdateSchema>
+
+// ---------------------------------------------------------------------------
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Enter your current password"),
+    newPassword: z.string().min(8, "New password must be at least 8 characters"),
+    confirmPassword: z.string().min(1, "Confirm your new password"),
+  })
+  .refine((v) => v.newPassword === v.confirmPassword, {
+    message: "New passwords do not match",
+    path: ["confirmPassword"],
+  })
+
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>
+
+export const resetPasswordSchema = z.object({
   staffId: z.string().uuid("Invalid staff"),
-  name: requiredText(1, 120),
-  phone: optionalPhone(),
-  role: z.enum(["OWNER", "ADMIN", "RECEPTIONIST", "TRAINER"] as const),
-  status: z.enum(["ACTIVE", "DEACTIVATED"] as const),
-  password: z.string().optional().nullable().refine((v) => !v || v.length >= 8, {
-    message: "Password must be at least 8 characters",
-  }),
+  newPassword: z.string().min(8, "Password must be at least 8 characters"),
 })
 
-export type StaffUpdateInput = z.infer<typeof staffUpdateSchema>
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
+
+export const permissionUpdateSchema = z.object({
+  staffId: z.string().uuid("Invalid staff"),
+  permissions: permissionsRecord(),
+})
+
+export type PermissionUpdateInput = z.input<typeof permissionUpdateSchema>
 
 // ---------------------------------------------------------------------------
 

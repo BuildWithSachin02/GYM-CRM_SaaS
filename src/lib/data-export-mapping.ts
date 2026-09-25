@@ -124,6 +124,7 @@ export const COLUMN_NUMFMT: Record<ColumnKind, string | undefined> = {
 export type ExportRowMap = {
   members: {
     id: string
+    memberCode: string | null
     firstName: string
     lastName: string
     phone: string
@@ -155,7 +156,7 @@ export type ExportRowMap = {
     expectedPaymentDate: Date | null
     createdAt: Date
     updatedAt: Date
-    member: { firstName: string; lastName: string; phone?: string | null }
+    member: { firstName: string; lastName: string; phone?: string | null; memberCode?: string | null }
     plan: { name: string; priceMinor: number }
     /**
      * Balance enrichment computed by the export service from RECORDED payments
@@ -193,7 +194,7 @@ export type ExportRowMap = {
     notes: string | null
     createdAt: Date
     updatedAt: Date
-    member: { firstName: string; lastName: string }
+    member: { firstName: string; lastName: string; memberCode?: string | null }
     membership: {
       id: string
       status: string
@@ -209,7 +210,7 @@ export type ExportRowMap = {
     dayKey: string
     checkedInAt: Date
     source: string
-    member: { firstName: string; lastName: string }
+    member: { firstName: string; lastName: string; memberCode?: string | null }
     location: { name: string } | null
     qrSession: { id: string; label: string | null } | null
   }
@@ -241,7 +242,7 @@ export type ExportRowMap = {
     notes: string | null
     createdAt: Date
     updatedAt: Date
-    member: { id: string; firstName: string; lastName: string } | null
+    member: { id: string; firstName: string; lastName: string; memberCode?: string | null } | null
     lead: { id: string; name: string } | null
     trainer: { user: { name: string } } | null
     staff: { name: string } | null
@@ -257,7 +258,7 @@ export type ExportRowMap = {
     updatedAt: Date
     assignee: { name: string } | null
     createdBy: { name: string } | null
-    member: { id: string; firstName: string; lastName: string } | null
+    member: { id: string; firstName: string; lastName: string; memberCode?: string | null } | null
     lead: { id: string; name: string } | null
   }
   qrSessions: {
@@ -306,6 +307,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "First Name", kind: "text" },
     { header: "Last Name", kind: "text" },
     { header: "Full Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Phone", kind: "text" },
     { header: "Email", kind: "text" },
     { header: "Gender", kind: "text" },
@@ -326,6 +328,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Membership ID", kind: "text" },
     { header: "Member ID", kind: "text" },
     { header: "Member Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Plan ID", kind: "text" },
     { header: "Plan Name", kind: "text" },
     { header: "Plan Price (INR)", kind: "money" },
@@ -359,6 +362,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Payment ID", kind: "text" },
     { header: "Member ID", kind: "text" },
     { header: "Member Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Payment Date", kind: "datetime" },
     { header: "Amount (INR)", kind: "money" },
     { header: "Currency", kind: "text" },
@@ -379,6 +383,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Check-in ID", kind: "text" },
     { header: "Member ID", kind: "text" },
     { header: "Member Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Date", kind: "date" },
     { header: "Checked In At", kind: "datetime" },
     { header: "Location", kind: "text" },
@@ -410,6 +415,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Appointment ID", kind: "text" },
     { header: "Member ID", kind: "text" },
     { header: "Member Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Lead ID", kind: "text" },
     { header: "Lead Name", kind: "text" },
     { header: "Trainer", kind: "text" },
@@ -432,6 +438,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Created By", kind: "text" },
     { header: "Member ID", kind: "text" },
     { header: "Member Name", kind: "text" },
+    { header: "Member Code", kind: "text" },
     { header: "Lead ID", kind: "text" },
     { header: "Lead Name", kind: "text" },
     { header: "Created At", kind: "datetime" },
@@ -476,6 +483,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
 export const FINANCIAL_SUMMARY_COLUMNS: ExportColumn[] = [
   { header: "Member ID", kind: "text" },
   { header: "Member Name", kind: "text" },
+  { header: "Member Code", kind: "text" },
   { header: "Current Membership", kind: "text" },
   { header: "Membership Status", kind: "text" },
   { header: "Start Date", kind: "date" },
@@ -502,6 +510,7 @@ function mapMembersRow(row: ExportRowMap["members"], timeZone: string): ExcelCel
     empty(row.firstName),
     empty(row.lastName),
     fullNameRow(row),
+    empty(row.memberCode),
     empty(row.phone),
     empty(row.email),
     row.gender ?? "",
@@ -527,6 +536,7 @@ function mapMembershipsRow(row: ExportRowMap["memberships"], timeZone: string): 
     empty(row.id),
     empty(row.memberId),
     fullNameRow(row.member),
+    empty(row.member.memberCode),
     empty(row.planId),
     empty(row.plan.name),
     minorToRupees(row.plan.priceMinor),
@@ -568,6 +578,7 @@ function mapPaymentsRow(row: ExportRowMap["payments"], timeZone: string): ExcelC
     empty(row.id),
     empty(row.memberId),
     fullNameRow(row.member),
+    empty(row.member.memberCode),
     dateTimeCellInZone(row.paymentDate, timeZone),
     minorToRupees(row.amountMinor),
     row.currency,
@@ -591,6 +602,7 @@ function mapAttendanceRow(row: ExportRowMap["attendance"], timeZone: string): Ex
     empty(row.id),
     empty(row.memberId),
     fullNameRow(row.member),
+    empty(row.member.memberCode),
     dateCellFromKey(row.dayKey),
     dateTimeCellInZone(row.checkedInAt, timeZone),
     empty(row.location?.name),
@@ -628,6 +640,7 @@ function mapAppointmentsRow(row: ExportRowMap["appointments"], timeZone: string)
     empty(row.id),
     empty(row.member?.id),
     row.member ? fullNameRow(row.member) : "",
+    empty(row.member?.memberCode),
     empty(row.lead?.id),
     empty(row.lead?.name),
     empty(row.trainer?.user.name),
@@ -653,6 +666,7 @@ function mapTasksRow(row: ExportRowMap["tasks"], timeZone: string): ExcelCell[] 
     empty(row.createdBy?.name),
     empty(row.member?.id),
     row.member ? fullNameRow(row.member) : "",
+    empty(row.member?.memberCode),
     empty(row.lead?.id),
     empty(row.lead?.name),
     dateTimeCellInZone(row.createdAt, timeZone),
@@ -741,6 +755,7 @@ export function mapFinancialSummaryRow(row: MemberFinancialSummaryRow): ExcelCel
   return [
     empty(row.memberId),
     empty(row.memberName),
+    empty(row.memberCode),
     empty(row.currentPlan),
     row.currentStatus,
     dateCellFromKey(row.currentStartKey),

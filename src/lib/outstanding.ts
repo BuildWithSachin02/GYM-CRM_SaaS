@@ -67,14 +67,34 @@ export type OutstandingMembership = {
 }
 
 export type OutstandingMembershipInput = OutstandingMembershipRecord & {
-  member: { firstName: string; lastName: string; phone?: string | null }
+  member: { firstName: string; lastName: string; phone?: string | null; memberCode?: string | null }
   plan: { name: string }
+}
+
+/**
+ * Search predicate shared by the Payments dues view (server page) and tests:
+ * match by member name OR by the display-only Member Code (MEM-XXXX). The
+ * member UUID stays the real internal identity; this only narrows which ledger
+ * rows to show, so it is PURE and caller-scoped (the ledger is already
+ * org-filtered by the loader).
+ */
+export function matchesDuesSearch(
+  row: { memberName: string; memberCode: string | null },
+  query: string
+): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return (
+    row.memberName.toLowerCase().includes(needle) ||
+    (row.memberCode?.toLowerCase().includes(needle) ?? false)
+  )
 }
 
 export type OutstandingDuesRow = {
   membershipId: string
   memberId: string
   memberName: string
+  memberCode: string | null
   memberPhone: string
   planName: string
   startKey: string
@@ -315,6 +335,7 @@ export function buildOutstandingDuesRows(input: {
       membershipId: m.id,
       memberId: m.memberId,
       memberName: fullName(m.member.firstName, m.member.lastName),
+      memberCode: m.member.memberCode ?? null,
       memberPhone: m.member.phone ?? "",
       planName: m.plan.name,
       startKey: dayKeyInTimeZone(m.startDate, input.timeZone),

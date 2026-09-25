@@ -12,6 +12,7 @@ import {
   FileText,
   LayoutDashboard,
   Settings,
+  ShieldCheck,
   TrendingUp,
   Users,
   UserCheck,
@@ -34,7 +35,7 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "members:view" },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard:view" },
   { label: "Members", href: "/dashboard/members", icon: Users, permission: "members:view", countKey: "members" },
   { label: "Memberships", href: "/dashboard/memberships", icon: UserCheck, permission: "memberships:view", countKey: "memberships" },
   { label: "Plans", href: "/dashboard/plans", icon: FileText, permission: "plans:view", countKey: "plans" },
@@ -46,6 +47,9 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Appointments", href: "/dashboard/appointments", icon: CalendarDays, permission: "appointments:view", countKey: "appointments" },
   { label: "Tasks", href: "/dashboard/tasks", icon: CheckSquare, permission: "tasks:view", countKey: "tasks" },
   { label: "Reports", href: "/dashboard/reports", icon: BarChart3, permission: "reports:view" },
+  { label: "Users & Access", href: "/dashboard/settings/users", icon: ShieldCheck, permission: "staff:manage" },
+  // Settings is ALWAYS the final navigation item — it must never appear before
+  // any module (Users & Access sits directly above it when authorized).
   { label: "Settings", href: "/dashboard/settings", icon: Settings, permission: "settings:view" },
 ]
 

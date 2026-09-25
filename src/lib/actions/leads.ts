@@ -14,6 +14,14 @@ import {
   type LeadStageInput,
 } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { can } from "@/lib/permissions"
+import {
+  isMemberCodeCollision,
+  nextMemberCode,
+} from "@/lib/member-code"
+
+/** Sequential-create retries: two creates may race for the same free code. */
+const MEMBER_CODE_MAX_TRIES = 5
 
 export type LeadActionResult =
   | { success: true; data: { id: string } }
@@ -33,6 +41,9 @@ function collectFieldErrors(
 
 export async function createLead(input: LeadInput): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:create")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = leadSchema.safeParse(input)
   if (!parsed.success) {
@@ -81,6 +92,9 @@ export async function updateLead(
   input: LeadInput
 ): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:update")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = leadSchema.safeParse(input)
   if (!parsed.success) {
@@ -136,6 +150,9 @@ export async function updateLead(
 
 export async function deleteLead(leadId: string): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:manage")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const existing = await prisma.lead.findFirst({
     where: { id: leadId, organizationId: user.organizationId, deletedAt: null },
@@ -170,6 +187,9 @@ export async function updateLeadStage(
   stage: LeadStageInput["stage"]
 ): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:update")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = leadStageSchema.safeParse({ leadId, stage })
   if (!parsed.success) {
@@ -215,6 +235,9 @@ export async function addLeadActivity(
   input: z.input<typeof leadActivitySchema>
 ): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:update")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = leadActivitySchema.safeParse(input)
   if (!parsed.success) {
@@ -264,6 +287,9 @@ export async function convertLeadToMember(
   input: z.input<typeof leadConvertSchema>
 ): Promise<LeadActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "leads:convert")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = leadConvertSchema.safeParse(input)
   if (!parsed.success) {
@@ -292,46 +318,72 @@ export async function convertLeadToMember(
   const endDate = new Date(data.startDate)
   endDate.setDate(endDate.getDate() + data.durationDays)
 
-  const result = await prisma.$transaction(async (tx) => {
-    const member = await tx.member.create({
-      data: {
-        organizationId: user.organizationId,
-        firstName,
-        lastName,
-        phone: lead.phone,
-        email: lead.email,
-        signupSource: lead.source,
-        status: "ACTIVE",
-      },
-      select: { id: true },
-    })
+  let result: { memberId: string } | null = null
+  let lastRaceError: unknown = null
+  for (let attempt = 0; attempt < MEMBER_CODE_MAX_TRIES; attempt += 1) {
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const existingCodes = await tx.member.findMany({
+          where: { organizationId: user.organizationId },
+          select: { memberCode: true },
+        })
+        const member = await tx.member.create({
+          data: {
+            organizationId: user.organizationId,
+            memberCode: nextMemberCode(existingCodes.map((r) => r.memberCode)),
+            firstName,
+            lastName,
+            phone: lead.phone,
+            email: lead.email,
+            signupSource: lead.source,
+            status: "ACTIVE",
+          },
+          select: { id: true, memberCode: true },
+        })
 
-    await tx.membership.create({
-      data: {
-        organizationId: user.organizationId,
-        memberId: member.id,
-        planId: data.planId,
-        startDate: data.startDate,
-        endDate,
-        amountMinor: data.amountMinor,
-        status: "ACTIVE",
-      },
-    })
+        await tx.membership.create({
+          data: {
+            organizationId: user.organizationId,
+            memberId: member.id,
+            planId: data.planId,
+            startDate: data.startDate,
+            endDate,
+            amountMinor: data.amountMinor,
+            status: "ACTIVE",
+          },
+        })
 
-    // Conversion assigns a membership only — it creates no revenue. Actual
-    // money received is recorded separately via Record Payment.
+        // Conversion assigns a membership only — it creates no revenue. Actual
+        // money received is recorded separately via Record Payment.
 
-    await tx.lead.update({
-      where: { id: data.leadId },
-      data: {
-        stage: "CONVERTED",
-        convertedMemberId: member.id,
-        convertedAt: new Date(),
-      },
-    })
+        await tx.lead.update({
+          where: { id: data.leadId },
+          data: {
+            stage: "CONVERTED",
+            convertedMemberId: member.id,
+            convertedAt: new Date(),
+          },
+        })
 
-    return { memberId: member.id }
-  })
+        return { memberId: member.id }
+      })
+      break
+    } catch (error) {
+      // A concurrent lead conversion claimed the same free code — recompute
+      // and retry the whole transaction with the next code. Only a memberCode
+      // collision retries; everything else is a real failure.
+      if (isMemberCodeCollision(error)) {
+        lastRaceError = error
+        continue
+      }
+      throw error
+    }
+  }
+
+  if (!result) {
+    console.error("leadConvert could not allocate a unique member code", lastRaceError)
+    return { success: false, error: "Could not convert the lead. Please try again." }
+  }
 
   await writeAudit({
     organizationId: user.organizationId,

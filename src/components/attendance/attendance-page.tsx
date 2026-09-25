@@ -24,6 +24,7 @@ import { QrManager } from "@/components/attendance/qr-manager"
 type SerializedCheckin = {
   id: string
   memberName: string
+  memberCode: string | null
   source: "MANUAL" | "QR_SESSION"
   checkedInAt: string
 }
@@ -35,7 +36,13 @@ type SerializedQrSession = {
   expiresAt: string
 }
 
-type Member = { id: string; firstName: string; lastName: string }
+type Member = {
+  id: string
+  firstName: string
+  lastName: string
+  memberCode?: string | null
+  phone?: string | null
+}
 type Location = { id: string; name: string }
 
 type AttendancePageProps = {
@@ -148,6 +155,11 @@ export function AttendancePage({
                     </TableCell>
                     <TableCell className="font-medium">
                       {c.memberName}
+                      {c.memberCode && (
+                        <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+                          {c.memberCode}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <StatusBadge

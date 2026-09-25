@@ -40,7 +40,7 @@ export default async function AttendanceRoute({
         },
         include: {
           member: {
-            select: { id: true, firstName: true, lastName: true },
+            select: { id: true, firstName: true, lastName: true, memberCode: true },
           },
         },
         orderBy: { checkedInAt: "desc" },
@@ -70,7 +70,7 @@ export default async function AttendanceRoute({
           status: "ACTIVE",
           deletedAt: null,
         },
-        select: { id: true, firstName: true, lastName: true },
+        select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
         orderBy: { firstName: "asc" },
       }),
       prisma.gymLocation.findMany({
@@ -89,6 +89,7 @@ export default async function AttendanceRoute({
   const serializedCheckins = checkins.map((c) => ({
     id: c.id,
     memberName: `${c.member.firstName} ${c.member.lastName}`,
+    memberCode: c.member.memberCode,
     source: c.source,
     checkedInAt: c.checkedInAt.toISOString(),
   }))

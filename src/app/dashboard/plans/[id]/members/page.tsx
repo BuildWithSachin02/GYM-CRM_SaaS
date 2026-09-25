@@ -27,6 +27,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function PlanMembersPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
+  if (!can(user, "plans:view")) notFound()
 
   const plan = await prisma.membershipPlan.findFirst({
     where: { id, organizationId: user.organizationId },
@@ -62,6 +63,7 @@ export default async function PlanMembersPage({ params }: PageProps) {
           firstName: true,
           lastName: true,
           phone: true,
+          memberCode: true,
           deletedAt: true,
         },
       },
@@ -89,6 +91,7 @@ export default async function PlanMembersPage({ params }: PageProps) {
       return {
         memberId,
         memberName: `${row.member.firstName} ${row.member.lastName}`.trim(),
+        memberCode: row.member.memberCode,
         phone: row.member.phone,
         status: lifecycle.status,
         daysLeft: lifecycle.daysLeft,

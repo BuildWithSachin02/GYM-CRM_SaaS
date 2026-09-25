@@ -43,7 +43,7 @@ export type MemberAttendanceOverview = {
 
 export type MemberAttendanceView = {
   todayKey: string
-  member: { id: string; name: string; status: string }
+  member: { id: string; name: string; memberCode: string | null; status: string }
   range: AttendanceRange
   lifetimeTotal: number
   lifetimeStreakCurrent: number
@@ -170,7 +170,7 @@ export async function getMemberAttendanceView(
 ): Promise<MemberAttendanceView | null> {
   const member = await prisma.member.findFirst({
     where: { id: memberId, organizationId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, status: true },
+    select: { id: true, firstName: true, lastName: true, memberCode: true, status: true },
   })
   if (!member) return null
 
@@ -228,6 +228,7 @@ export async function getMemberAttendanceView(
     member: {
       id: member.id,
       name: `${member.firstName} ${member.lastName}`.trim(),
+      memberCode: member.memberCode,
       status: member.status,
     },
     range,

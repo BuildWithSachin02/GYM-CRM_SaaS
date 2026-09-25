@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow } from "@/lib/auth/auth"
 import { paymentSchema, type PaymentInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { can } from "@/lib/permissions"
 import { checkMembershipPaymentLink } from "@/lib/payments"
 import { checkPaymentAmount } from "@/lib/outstanding"
 import { dayKeyInTimeZone, utcInstantForKey } from "@/lib/memberships"
@@ -16,6 +17,9 @@ export type PaymentActionResult =
 
 export async function recordPayment(input: PaymentInput): Promise<PaymentActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "payments:record")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = paymentSchema.safeParse(input)
   if (!parsed.success) {
@@ -141,6 +145,9 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
 
 export async function voidPayment(paymentId: string): Promise<PaymentActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "payments:record")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const existing = await prisma.payment.findFirst({
     where: { id: paymentId, organizationId: user.organizationId },

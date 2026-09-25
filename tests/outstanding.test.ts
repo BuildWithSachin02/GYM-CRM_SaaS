@@ -8,6 +8,7 @@ import {
   checkPaymentAmount,
   deriveOutstandingStatus,
   isOutstandingTrackedStatus,
+  matchesDuesSearch,
   outstandingOfMembership,
   OUTSTANDING_STATUS_ORDER,
   summarizeOutstanding,
@@ -361,4 +362,172 @@ test("outstandingOfMembership clamps a negative balance at zero defensively", ()
   const row = outstandingOfMembership({ row: membership, paidMinor: 999999, timeZone: TZ, today: TODAY })
   assert.equal(row.outstandingMinor, 0)
   assert.equal(row.status, "PAID")
+})
+
+// ---------------------------------------------------------------------------
+// REGRESSION: a balance with ZERO Payment rows must still show as pending dues
+// (the Prince Gond / MEM-0028 ₹3,499 case). The dues ledger is derived from
+// membership price − RECORDED payments, never from a Payment row existing.
+// ---------------------------------------------------------------------------
+
+test("REGRESSION: unpaid membership with zero Payment rows appears as PENDING dues", () => {
+  const membership = makeMembership({
+    id: "prince-gond",
+    memberId: "member-prince",
+    amountMinor: 349900, // ₹3,499
+    expectedPaymentDate: null,
+    member: { firstName: "Prince", lastName: "Gond", memberCode: "MEM-0028" },
+  })
+  const rows = buildOutstandingDuesRows({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].membershipId, "prince-gond")
+  assert.equal(rows[0].memberName, "Prince Gond")
+  assert.equal(rows[0].memberCode, "MEM-0028")
+  assert.equal(rows[0].paidMinor, 0)
+  assert.equal(rows[0].outstandingMinor, 349900)
+  assert.equal(rows[0].status, "PENDING")
+  assert.equal(rows[0].expectedPaymentKey, null)
+})
+
+test("CASE A: ₹5,000 membership, ₹0 paid → ₹5,000 outstanding, listed as pending", () => {
+  const membership = makeMembership({ id: "m-a", amountMinor: 500000 })
+  const rows = buildOutstandingDuesRows({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(rows[0].paidMinor, 0)
+  assert.equal(rows[0].outstandingMinor, 500000)
+  assert.equal(rows[0].status, "PENDING")
+})
+
+test("CASE B: ₹5,000 membership, ₹1,000 paid → ₹4,000 outstanding, still pending", () => {
+  const membership = makeMembership({ id: "m-b", amountMinor: 500000 })
+  const rows = buildOutstandingDuesRows({
+    memberships: [membership],
+    payments: [makePayment("m-b", 100000)],
+    timeZone: TZ,
+    today: TODAY,
+  })
+  assert.equal(rows[0].paidMinor, 100000)
+  assert.equal(rows[0].outstandingMinor, 400000)
+  assert.equal(rows[0].status, "PENDING")
+})
+
+test("CASE C: fully paid membership is excluded from the pending list", () => {
+  const membership = makeMembership({ id: "m-c", amountMinor: 500000 })
+  const rows = buildOutstandingDuesRows({
+    memberships: [membership],
+    payments: [makePayment("m-c", 500000)],
+    timeZone: TZ,
+    today: TODAY,
+  })
+  assert.equal(rows[0].status, "PAID")
+  // The Payments page's PENDING filter is `status === "PENDING"` — a settled
+  // membership never matches it, so it drops off the pending-due list.
+  assert.equal(rows.filter((r) => r.status === "PENDING").length, 0)
+})
+
+test("CASE E: outstanding with NO due date is PENDING (never OVERDUE, never hidden)", () => {
+  const membership = makeMembership({
+    id: "m-e",
+    amountMinor: 349900,
+    expectedPaymentDate: null,
+  })
+  const rows = buildOutstandingDuesRows({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(rows[0].status, "PENDING")
+  assert.equal(rows[0].expectedPaymentKey, null)
+})
+
+test("CASE F: outstanding with a future due date is PENDING", () => {
+  const membership = makeMembership({
+    id: "m-f",
+    expectedPaymentDate: new Date("2026-09-30T06:00:00Z"), // after the fixed TODAY
+  })
+  const rows = buildOutstandingDuesRows({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(rows[0].status, "PENDING")
+  assert.equal(rows[0].daysRemaining, 8)
+})
+
+test("CASE G: outstanding with a passed due date is OVERDUE", () => {
+  const membership = makeMembership({
+    id: "m-g",
+    expectedPaymentDate: new Date("2026-09-10T06:00:00Z"),
+  })
+  const rows = buildOutstandingDuesRows({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(rows[0].status, "OVERDUE")
+  assert.equal(rows[0].daysOverdue, 12)
+})
+
+test("CASE H: multiple memberships keep separate balances — no double counting", () => {
+  const paid = makeMembership({ id: "m-h1", memberId: "member-multi", amountMinor: 500000 })
+  const unpaid = makeMembership({ id: "m-h2", memberId: "member-multi", amountMinor: 400000 })
+  const rows = buildOutstandingDuesRows({
+    memberships: [paid, unpaid],
+    payments: [makePayment("m-h1", 500000)],
+    timeZone: TZ,
+    today: TODAY,
+  })
+  const dues = rows.filter((r) => r.status === "PENDING" || r.status === "OVERDUE")
+  assert.equal(dues.length, 1)
+  assert.equal(dues[0].membershipId, "m-h2")
+  assert.equal(dues[0].outstandingMinor, 400000)
+  // The settled membership's ₹5,000 is never netted against the open ₹4,000.
+  assert.equal(summarizeOutstanding(buildOutstandingMemberships({
+    memberships: [paid, unpaid],
+    payments: [makePayment("m-h1", 500000)],
+    timeZone: TZ,
+    today: TODAY,
+  })).totalOutstandingMinor, 400000)
+})
+
+test("recording a payment reduces outstanding; a second (settling) payment clears it", () => {
+  const membership = makeMembership({ id: "m-pay", amountMinor: 349900 })
+  const afterFirst = buildOutstandingDuesRows({
+    memberships: [membership],
+    payments: [makePayment("m-pay", 100000)],
+    timeZone: TZ,
+    today: TODAY,
+  })
+  assert.equal(afterFirst[0].outstandingMinor, 249900)
+  assert.equal(afterFirst[0].status, "PENDING")
+  assert.equal(afterFirst[0].paymentCount, 1)
+
+  const afterSecond = buildOutstandingDuesRows({
+    memberships: [membership],
+    payments: [makePayment("m-pay", 100000), makePayment("m-pay", 249900)],
+    timeZone: TZ,
+    today: TODAY,
+  })
+  assert.equal(afterSecond[0].outstandingMinor, 0)
+  assert.equal(afterSecond[0].status, "PAID")
+  assert.equal(afterSecond[0].paymentCount, 2)
+  assert.equal(afterSecond.filter((r) => r.status === "PENDING").length, 0)
+})
+
+test("an unpaid balance is NEVER revenue (outstanding ≠ received)", () => {
+  // ₹3,499 outstanding exists only as a balance: zero RECORDED payments means
+  // zero paid. The outstanding amount is what is still owed — it is never
+  // added to paid totals (the revenue pipeline counts only Payment rows).
+  const membership = makeMembership({ id: "m-rev", amountMinor: 349900 })
+  const [row] = buildOutstandingMemberships({ memberships: [membership], payments: [], timeZone: TZ, today: TODAY })
+  assert.equal(row.paidMinor, 0)
+  assert.equal(row.outstandingMinor, 349900)
+  assert.equal(buildOutstandingTotals([]).get("m-rev"), undefined)
+})
+
+// ---------------------------------------------------------------------------
+// Dues search (member name + Member Code) — the Payments pending view predicate
+// ---------------------------------------------------------------------------
+
+test("dues search matches by member name and by Member Code, case-insensitively", () => {
+  const row = { memberName: "Prince Gond", memberCode: "MEM-0028" }
+  assert.equal(matchesDuesSearch(row, ""), true)
+  assert.equal(matchesDuesSearch(row, "Prince"), true)
+  assert.equal(matchesDuesSearch(row, "  prince gond  "), true)
+  assert.equal(matchesDuesSearch(row, "MEM-0028"), true)
+  assert.equal(matchesDuesSearch(row, "mem-0028"), true)
+  assert.equal(matchesDuesSearch(row, "0028"), true)
+  assert.equal(matchesDuesSearch(row, "arjun"), false)
+})
+
+test("dues search never exposes the raw phone (name/code only)", () => {
+  const row = { memberName: "Prince Gond", memberCode: "MEM-0028" }
+  assert.equal(matchesDuesSearch(row, "90000 10020"), false)
 })

@@ -34,6 +34,7 @@ import { MemberForm } from "@/components/members/member-form"
 
 type SerializedMember = {
   id: string
+  memberCode: string
   firstName: string
   lastName: string
   phone: string
@@ -145,7 +146,7 @@ export function MemberList({
         <div className="relative w-full max-w-sm">
           <SearchIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search by name, phone, or email..."
+            placeholder="Search by name, member ID or phone..."
             value={searchValue}
             onChange={(e) => updateSearch(e.target.value)}
             className="pl-9"
@@ -192,6 +193,7 @@ export function MemberList({
                 <TableRow>
                   <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Name</TableHead>
+                  <TableHead>Code</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
@@ -221,6 +223,9 @@ export function MemberList({
                           </Avatar>
                           <span className="font-medium">{name}</span>
                         </Link>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {member.memberCode}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {member.phone}

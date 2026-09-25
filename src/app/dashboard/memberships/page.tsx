@@ -91,6 +91,7 @@ export default async function MembershipsPage({
   searchParams: SearchParams
 }) {
   const user = await requireUser()
+  if (!can(user, "memberships:view")) notFound()
   const params = await searchParams
   const timeZone = user.organization.timezone
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
@@ -132,7 +133,7 @@ export default async function MembershipsPage({
             organizationId: user.organizationId,
             deletedAt: null,
           },
-          select: { id: true, firstName: true, lastName: true },
+          select: { id: true, firstName: true, lastName: true, memberCode: true },
         })
       : null
     if (!target) notFound()
@@ -149,6 +150,7 @@ export default async function MembershipsPage({
       <MembershipHistory
         memberId={target.id}
         memberName={`${target.firstName} ${target.lastName}`.trim()}
+        memberCode={target.memberCode}
         memberships={serializeHistoryRows(rows, timeZone, todayKey, paidByMembership)}
         plans={plans}
         canManage={canManage}
@@ -162,7 +164,7 @@ export default async function MembershipsPage({
       organizationId: user.organizationId,
     },
     include: {
-      member: { select: { id: true, firstName: true, lastName: true } },
+      member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
       plan: { select: { id: true, name: true } },
     },
     orderBy: [{ member: { firstName: "asc" } }, { member: { lastName: "asc" } }],
@@ -184,7 +186,11 @@ export default async function MembershipsPage({
 
     const member = primary.row.member
     const memberName = `${member.firstName} ${member.lastName}`.trim()
-    if (q && !memberName.toLowerCase().includes(q.toLowerCase())) continue
+    if (q) {
+      const nameMatches = memberName.toLowerCase().includes(q.toLowerCase())
+      const codeMatches = (member.memberCode ?? "").toLowerCase().includes(q.toLowerCase())
+      if (!nameMatches && !codeMatches) continue
+    }
     if (statusFilter) {
       if (!isLifecycleStatus(statusFilter)) continue
       if (primary.lifecycle.status !== statusFilter) continue
@@ -206,6 +212,7 @@ export default async function MembershipsPage({
       id: primary.row.id,
       memberId,
       memberName,
+      memberCode: member.memberCode ?? null,
       planId: primary.row.plan.id,
       planName: primary.row.plan.name,
       startDate: primary.row.startDate.toISOString(),
@@ -236,7 +243,7 @@ export default async function MembershipsPage({
   const members = await prisma.member.findMany({
     where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
   })
 
   return (

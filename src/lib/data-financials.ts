@@ -46,6 +46,7 @@ export type FinancialPaymentRow = {
 export type MemberFinancialSummaryRow = {
   memberId: string
   memberName: string
+  memberCode: string | null
   /** Plan name of the member's primary (current) membership; "" when none. */
   currentPlan: string
   /** Lifecycle status (ACTIVE/EXPIRING_SOON/UPCOMING/EXPIRED/CANCELLED/PAUSED). */
@@ -69,6 +70,8 @@ export type MemberFinancialSummaryRow = {
 export type FinancialAggregationInput = {
   /** Universe members (memberId → "First Last"). Order is not significant. */
   memberNames: ReadonlyMap<string, string>
+  /** Universe members (memberId → member code); default empty when absent. */
+  memberCodes?: ReadonlyMap<string, string | null>
   /** ALL memberships of the universe members (all time), for current coverage. */
   memberships: readonly FinancialMembershipRow[]
   /** Payments of the universe members, already scoped by the export range. */
@@ -111,7 +114,7 @@ function latestOf(rows: readonly FinancialPaymentRow[]): FinancialPaymentRow | n
 export function buildMemberFinancialRows(
   input: FinancialAggregationInput
 ): MemberFinancialSummaryRow[] {
-  const { memberNames, memberships, payments, membershipRange, timeZone, today } = input
+  const { memberNames, memberCodes, memberships, payments, membershipRange, timeZone, today } = input
 
   const membershipsByMember = new Map<string, FinancialMembershipRow[]>()
   for (const m of memberships) {
@@ -153,6 +156,7 @@ export function buildMemberFinancialRows(
     rows.push({
       memberId,
       memberName,
+      memberCode: memberCodes?.get(memberId) ?? null,
       currentPlan: primary?.row.plan.name ?? "",
       currentStatus: primary?.lifecycle.status ?? "",
       currentStartKey,

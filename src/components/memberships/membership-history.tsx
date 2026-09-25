@@ -50,6 +50,7 @@ type SerializedMembership = {
 type MembershipHistoryProps = {
   memberId: string
   memberName: string
+  memberCode?: string | null
   memberships: SerializedMembership[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   canManage: boolean
@@ -58,6 +59,7 @@ type MembershipHistoryProps = {
 export function MembershipHistory({
   memberId,
   memberName,
+  memberCode,
   memberships,
   plans,
   canManage,
@@ -66,7 +68,7 @@ export function MembershipHistory({
     <div className="space-y-6">
       <PageHeader
         title={memberName}
-        description={`${memberships.length} ${
+        description={`${memberCode ? `${memberCode} · ` : ""}${memberships.length} ${
           memberships.length === 1 ? "membership record" : "membership records"
         } (all-time history)`}
         actions={

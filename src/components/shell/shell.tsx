@@ -26,6 +26,7 @@ const TITLES: Record<string, string> = {
   "/dashboard/notifications": "Notifications",
   "/dashboard/reports": "Reports",
   "/dashboard/settings": "Settings",
+  "/dashboard/settings/users": "Users & Access",
 }
 
 function titleForPath(pathname: string): string {

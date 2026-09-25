@@ -33,6 +33,7 @@ export type DashboardData = {
   expiringMemberships: {
     id: string
     memberName: string
+    memberCode: string | null
     memberId: string
     planName: string
     endDate: string
@@ -56,6 +57,7 @@ export type DashboardData = {
     id: string
     memberId: string
     memberName: string
+    memberCode: string | null
     amountMinor: number
     method: string
     paymentDate: string
@@ -66,6 +68,7 @@ export type DashboardData = {
     firstName: string
     lastName: string
     phone: string
+    memberCode: string | null
     status: string
     createdAt: string
   }[]
@@ -257,7 +260,7 @@ async function getExpiringMemberships(organizationId: string, timeZone: string) 
       endDate: true,
       status: true,
       plan: { select: { name: true } },
-      member: { select: { id: true, firstName: true, lastName: true } },
+      member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
     },
   })
 
@@ -279,6 +282,7 @@ async function getExpiringMemberships(organizationId: string, timeZone: string) 
       return {
         id: row.id,
         memberName: `${row.member.firstName} ${row.member.lastName}`,
+        memberCode: row.member.memberCode,
         memberId: row.member.id,
         planName: row.plan.name,
         endDate: coverage.currentInterval.endKey,
@@ -355,7 +359,7 @@ async function getRecentPayments(organizationId: string) {
       amountMinor: true,
       method: true,
       paymentDate: true,
-      member: { select: { id: true, firstName: true, lastName: true } },
+      member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
       recordedBy: { select: { name: true } },
     },
   })
@@ -363,6 +367,7 @@ async function getRecentPayments(organizationId: string) {
     id: p.id,
     memberId: p.member.id,
     memberName: `${p.member.firstName} ${p.member.lastName}`,
+    memberCode: p.member.memberCode,
     amountMinor: p.amountMinor,
     method: p.method,
     paymentDate: p.paymentDate.toISOString(),
@@ -380,6 +385,7 @@ async function getRecentMembers(organizationId: string) {
       firstName: true,
       lastName: true,
       phone: true,
+      memberCode: true,
       status: true,
       createdAt: true,
     },
@@ -389,6 +395,7 @@ async function getRecentMembers(organizationId: string) {
     firstName: m.firstName,
     lastName: m.lastName,
     phone: m.phone,
+    memberCode: m.memberCode,
     status: m.status,
     createdAt: m.createdAt.toISOString(),
   }))

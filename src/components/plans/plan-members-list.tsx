@@ -24,6 +24,7 @@ import {
 type SerializedMember = {
   memberId: string
   memberName: string
+  memberCode: string | null
   phone: string
   status: MembershipLifecycleStatus
   daysLeft: number | null
@@ -107,6 +108,11 @@ export function PlanMembersList({
                       </Link>
                     ) : (
                       <span className="font-medium">{m.memberName}</span>
+                    )}
+                    {m.memberCode && (
+                      <span className="ml-2 font-mono text-xs text-muted-foreground">
+                        {m.memberCode}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{m.phone}</TableCell>

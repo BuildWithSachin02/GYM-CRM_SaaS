@@ -71,7 +71,7 @@ const appointmentFormSchema = z
 type AppointmentFormValues = z.infer<typeof appointmentFormSchema>
 
 type AppointmentFormProps = {
-  members: { id: string; name: string }[]
+  members: { id: string; name: string; memberCode?: string | null }[]
   leads: { id: string; name: string }[]
   trainers: { id: string; name: string }[]
   trigger?: React.ReactNode
@@ -201,7 +201,10 @@ export function AppointmentForm({
                       <EntityCombobox
                         value={field.value ?? ""}
                         onValueChange={(v) => field.onChange(v || "")}
-                        options={members.map((m) => ({ id: m.id, label: m.name }))}
+                        options={members.map((m) => ({
+                          id: m.id,
+                          label: m.memberCode ? `${m.name} / ${m.memberCode}` : m.name,
+                        }))}
                         placeholder="Search or select member"
                         emptyText="No members found."
                       />

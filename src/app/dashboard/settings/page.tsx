@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
@@ -12,36 +13,22 @@ export const metadata: Metadata = {
 
 export default async function SettingsPageServer() {
   const user = await requireUser()
+  if (!can(user, "settings:view")) notFound()
 
-  const [org, staff] = await Promise.all([
-    prisma.organization.findUnique({
-      where: { id: user.organizationId },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        address: true,
-        city: true,
-        state: true,
-        country: true,
-        timezone: true,
-      },
-    }),
-    prisma.user.findMany({
-      where: { organizationId: user.organizationId },
-      orderBy: [{ role: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        role: true,
-        status: true,
-        createdAt: true,
-      },
-    }),
-  ])
+  const org = await prisma.organization.findUnique({
+    where: { id: user.organizationId },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      address: true,
+      city: true,
+      state: true,
+      country: true,
+      timezone: true,
+    },
+  })
 
   const serializedOrg = org
     ? {
@@ -57,23 +44,12 @@ export default async function SettingsPageServer() {
       }
     : null
 
-  const serializedStaff = staff.map((s) => ({
-    id: s.id,
-    name: s.name,
-    email: s.email,
-    phone: s.phone,
-    role: s.role,
-    status: s.status,
-    createdAt: s.createdAt.toISOString(),
-  }))
-
   return (
     <SettingsPage
       org={serializedOrg}
-      staff={serializedStaff}
-      currentUserId={user.id}
       canManageSettings={can(user, "settings:manage")}
       canManageStaff={can(user, "staff:manage")}
+      isOwner={user.role === "OWNER"}
     />
   )
 }

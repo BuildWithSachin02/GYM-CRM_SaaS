@@ -20,7 +20,14 @@ export async function loginAction(input: { email: string; password: string }) {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, email: true, passwordHash: true, status: true, organizationId: true },
+    select: {
+      id: true,
+      email: true,
+      passwordHash: true,
+      status: true,
+      organizationId: true,
+      sessionVersion: true,
+    },
   })
 
   if (!user) {
@@ -36,7 +43,7 @@ export async function loginAction(input: { email: string; password: string }) {
     return { error: "This account has been deactivated. Contact your administrator." }
   }
 
-  const token = await createSessionToken(user.id)
+  const token = await createSessionToken(user.id, user.sessionVersion)
   const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,

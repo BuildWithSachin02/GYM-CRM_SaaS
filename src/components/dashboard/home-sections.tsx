@@ -228,7 +228,9 @@ export async function HomeRemainingSection({
                   >
                     {m.memberName}
                   </Link>
-                  <p className="truncate text-xs text-muted-foreground">{m.planName}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {m.memberCode ? `${m.memberCode} · ${m.planName}` : m.planName}
+                  </p>
                 </div>
                 {m.daysLeft <= 7 ? (
                   <StatusBadge tone="destructive">{m.daysLeft} days left</StatusBadge>
@@ -334,6 +336,7 @@ export async function HomeDuesSection({
                     {r.memberName}
                   </Link>
                   <p className="truncate text-xs text-muted-foreground">
+                    {r.memberCode ? `${r.memberCode} · ` : ""}
                     {r.planName}
                     {r.expectedPaymentKey && ` · due ${formatDate(r.expectedPaymentKey)}`} ·{" "}
                     <span className="text-red-600 dark:text-red-400">
@@ -385,6 +388,7 @@ export async function HomeDuesSection({
                     {r.memberName}
                   </Link>
                   <p className="truncate text-xs text-muted-foreground">
+                    {r.memberCode ? `${r.memberCode} · ` : ""}
                     {r.planName}
                     {r.expectedPaymentKey
                       ? ` · due ${formatDate(r.expectedPaymentKey)}`
@@ -447,6 +451,7 @@ export async function HomeActivitySection({
                         {p.memberName}
                       </Link>
                       <p className="text-xs text-muted-foreground">
+                        {p.memberCode ? `${p.memberCode} · ` : ""}
                         {formatDateTime(p.paymentDate)} · by {p.recordedBy}
                       </p>
                     </div>
@@ -540,7 +545,10 @@ export async function HomeActivitySection({
                     >
                       {m.firstName} {m.lastName}
                     </Link>
-                    <p className="text-xs text-muted-foreground">{m.phone}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {m.memberCode ? `${m.memberCode} · ` : ""}
+                      {m.phone}
+                    </p>
                   </div>
                   <StatusBadge tone={MEMBER_STATUS[m.status as keyof typeof MEMBER_STATUS]?.tone ?? "muted"}>
                     {MEMBER_STATUS[m.status as keyof typeof MEMBER_STATUS]?.label ?? m.status}

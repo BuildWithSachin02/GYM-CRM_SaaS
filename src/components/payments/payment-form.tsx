@@ -7,7 +7,11 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 
-import { formatDate, formatMoney, fullName } from "@/lib/format"
+import { formatDate, formatMoney } from "@/lib/format"
+import {
+  memberSelectionLabel,
+  memberSelectionSublabel,
+} from "@/lib/member-code"
 import { recordPayment } from "@/lib/actions/payments"
 
 import { Button } from "@/components/ui/button"
@@ -79,6 +83,7 @@ type MemberOption = {
   firstName: string
   lastName: string
   phone: string
+  memberCode?: string | null
   memberships: MemberMembership[]
 }
 
@@ -231,8 +236,8 @@ export function PaymentForm({
                       }}
                       options={members.map((m) => ({
                         id: m.id,
-                        label: fullName(m.firstName, m.lastName),
-                        sublabel: m.phone,
+                        label: memberSelectionLabel(m),
+                        sublabel: memberSelectionSublabel(m),
                       }))}
                       placeholder="Search or select a member"
                       emptyText="No members found."

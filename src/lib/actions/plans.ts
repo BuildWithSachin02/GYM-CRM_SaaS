@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow } from "@/lib/auth/auth"
 import { planFormSchema, type PlanInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { can } from "@/lib/permissions"
 import type { PlanInterval } from "@prisma/client"
 
 export type PlanActionResult =
@@ -14,6 +15,9 @@ export type PlanActionResult =
 
 export async function createPlan(input: PlanInput): Promise<PlanActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "plans:manage")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = planFormSchema.safeParse(input)
   if (!parsed.success) {
@@ -61,6 +65,9 @@ export async function updatePlan(
   input: PlanInput
 ): Promise<PlanActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "plans:manage")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const parsed = planFormSchema.safeParse(input)
   if (!parsed.success) {
@@ -114,6 +121,9 @@ export async function updatePlan(
 
 export async function archivePlan(planId: string): Promise<PlanActionResult> {
   const user = await requireUserOrThrow()
+  if (!can(user, "plans:manage")) {
+    return { success: false, error: "Not authorized" }
+  }
 
   const existing = await prisma.membershipPlan.findFirst({
     where: { id: planId, organizationId: user.organizationId },

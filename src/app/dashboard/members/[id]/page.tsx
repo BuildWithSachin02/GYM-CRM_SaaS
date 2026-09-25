@@ -38,11 +38,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function MemberDetailPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
+  if (!can(user, "members:view")) notFound()
 
   const member = await prisma.member.findFirst({
     where: { id, organizationId: user.organizationId, deletedAt: null },
     select: {
       id: true,
+      memberCode: true,
       firstName: true,
       lastName: true,
       phone: true,

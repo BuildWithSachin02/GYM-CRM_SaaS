@@ -7,7 +7,11 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 
-import { fullName, formatMoney } from "@/lib/format"
+import { formatMoney } from "@/lib/format"
+import {
+  memberSelectionLabel,
+  memberSelectionSublabel,
+} from "@/lib/member-code"
 import { createMembership } from "@/lib/actions/memberships"
 
 import { Button } from "@/components/ui/button"
@@ -49,7 +53,13 @@ const membershipFormSchema = z.object({
 type MembershipFormValues = z.infer<typeof membershipFormSchema>
 
 type MembershipFormProps = {
-  members: { id: string; firstName: string; lastName: string }[]
+  members: {
+    id: string
+    firstName: string
+    lastName: string
+    memberCode?: string | null
+    phone?: string | null
+  }[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   /** Business date (YYYY-MM-DD) in the org's timezone, from the server. */
   todayKey: string
@@ -173,7 +183,7 @@ export function MembershipForm({
                   <FormControl>
                     {lockedMember ? (
                       <Input
-                        value={fullName(lockedMember.firstName, lockedMember.lastName)}
+                        value={memberSelectionLabel(lockedMember)}
                         readOnly
                         disabled
                       />
@@ -183,7 +193,8 @@ export function MembershipForm({
                         onValueChange={field.onChange}
                         options={members.map((m) => ({
                           id: m.id,
-                          label: fullName(m.firstName, m.lastName),
+                          label: memberSelectionLabel(m),
+                          sublabel: memberSelectionSublabel(m),
                         }))}
                         placeholder="Search or select a member"
                         emptyText="No members found."

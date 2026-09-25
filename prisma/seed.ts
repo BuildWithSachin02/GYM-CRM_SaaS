@@ -315,12 +315,15 @@ async function main() {
   const members = []
   let createdMembershipCount = 0
   let createdPaymentCount = 0
+  let memberCodeSeq = 0
   for (let i = 0; i < memberSeeds.length; i++) {
     const s = memberSeeds[i]
+    memberCodeSeq += 1
     const member = await prisma.member.create({
       data: {
         organizationId: org.id,
         primaryLocationId: location.id,
+        memberCode: `MEM-${String(memberCodeSeq).padStart(4, "0")}`,
         firstName: s.first,
         lastName: s.last,
         phone: s.phone,

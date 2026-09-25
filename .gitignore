@@ -31,6 +31,7 @@ yarn-error.log*
 next-debug.log*
 dev-server.log
 dev-server.err.log
+.next-dev.log
 
 # env files (can opt-in for committing if needed)
 .env*

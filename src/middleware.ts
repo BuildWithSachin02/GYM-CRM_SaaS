@@ -6,8 +6,8 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session"
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
   const token = req.cookies.get(SESSION_COOKIE)?.value
-  const userId = await verifySessionToken(token)
-  const isAuthenticated = userId !== null
+  const decoded = await verifySessionToken(token)
+  const isAuthenticated = decoded !== null
 
   if (pathname.startsWith("/dashboard") && !isAuthenticated) {
     const url = req.nextUrl.clone()

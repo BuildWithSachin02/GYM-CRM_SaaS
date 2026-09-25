@@ -36,6 +36,8 @@ Member identity is resolved from the **authenticated session**, never from the Q
 
 Where members have no device, staff select or search the member in the attendance screen. The server still enforces membership validity and tenancy; the member identity comes from the server-resolved member record, not from a client-supplied raw ID. A location-based QRSession may still be used to scope the attendance point.
 
+Staff search on the attendance/manual check-in screen also matches the member's **Member Code** (`MEM-0042`) and shows it next to the member name, so members with identical names are disambiguated by staff in seconds. The code is a **display/search convenience only** — the check-in still binds the resolved member UUID, and the code is never read from a client-supplied string or used for authorization.
+
 ## 5. Server-side rules
 
 - **Tenancy**: the QR session and check-in are organization-scoped; the staff user must have `attendance:record` at that location.
@@ -79,7 +81,7 @@ To avoid re-searching the member list on every scan, a browser can *remember* th
 
 ### 9.1 Identity confirmation before remembering
 
-Before a device is ever created the member is shown an explicit **confirmation screen** (`Confirm your identity`): their full name, a **masked phone** (`maskPhone`, only the last four digits — the raw number is never sent to the browser) and the current plan label when today is covered. The "Remember this device" checkbox lives **on the confirmation screen, unchecked by default**, and resets to unchecked before every selection. Selecting a name from search alone never creates a device; only confirmation does.
+Before a device is ever created the member is shown an explicit **confirmation screen** (`Confirm your identity`): their full name, a **masked phone** (`maskPhone`, only the last four digits — the raw number is never sent to the browser) and the current plan label when today is covered. The member's **Member Code** may also be shown as an identity hint — it is display-only and never sent into the QR flow. The "Remember this device" checkbox lives **on the confirmation screen, unchecked by default**, and resets to unchecked before every selection. Selecting a name from search alone never creates a device; only confirmation does.
 
 ### 9.2 "Not you? Report wrong identity"
 

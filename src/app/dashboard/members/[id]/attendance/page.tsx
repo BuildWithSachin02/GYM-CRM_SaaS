@@ -54,7 +54,7 @@ export default async function MemberAttendanceRoute({
           deletedAt: null,
           id: { not: member.id },
         },
-        select: { id: true, firstName: true, lastName: true },
+        select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
         orderBy: { firstName: "asc" },
       })
     : []
@@ -79,6 +79,7 @@ export default async function MemberAttendanceRoute({
     <MemberAttendancePage
       memberId={view.member.id}
       memberName={view.member.name}
+      memberCode={view.member.memberCode}
       timeZone={timeZone}
       presets={ATTENDANCE_RANGE_PRESETS.map((p) => ({
         id: p.id,

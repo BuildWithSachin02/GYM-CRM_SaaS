@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
@@ -31,6 +32,7 @@ export default async function LeadsPage({
   searchParams: SearchParams
 }) {
   const user = await requireUser()
+  if (!can(user, "leads:view")) notFound()
   const params = await searchParams
 
   const q = params.q?.trim() || ""

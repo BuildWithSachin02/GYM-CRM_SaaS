@@ -59,6 +59,7 @@ type Preset = { id: string; label: string }
 type MemberAttendancePageProps = {
   memberId: string
   memberName: string
+  memberCode?: string | null
   timeZone: string
   presets: Preset[]
   range: { preset: string; fromKey: string | null; toKey: string | null }
@@ -101,6 +102,7 @@ const RANGE_LABELS: Record<string, string> = {
 export function MemberAttendancePage({
   memberId,
   memberName,
+  memberCode = null,
   timeZone,
   presets,
   range,
@@ -160,6 +162,9 @@ export function MemberAttendancePage({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{memberName}</h1>
+          {memberCode && (
+            <p className="text-xs font-medium text-muted-foreground">{memberCode}</p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">
             Attendance · {rangeLabel} · {totalCount.toLocaleString("en-IN")}{" "}
             {totalCount === 1 ? "check-in" : "check-ins"}

@@ -28,7 +28,7 @@ export default async function AttendanceRequestsRoute() {
     take: 200,
     include: {
       member: {
-        select: { id: true, firstName: true, lastName: true, status: true },
+        select: { id: true, firstName: true, lastName: true, status: true, memberCode: true },
       },
       approvedBy: { select: { name: true } },
       rejectedBy: { select: { name: true } },
@@ -42,6 +42,7 @@ export default async function AttendanceRequestsRoute() {
     id: r.id,
     memberId: r.member.id,
     memberName: `${r.member.firstName} ${r.member.lastName}`,
+    memberCode: r.member.memberCode,
     memberActive: r.member.status === "ACTIVE",
     dayKey: r.dayKey,
     requestedAt: r.requestedAt.toISOString(),

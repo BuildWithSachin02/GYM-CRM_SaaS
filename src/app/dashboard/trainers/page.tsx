@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
@@ -5,6 +6,7 @@ import { TrainerList } from "@/components/trainers/trainer-list"
 
 export default async function TrainersPage() {
   const user = await requireUser()
+  if (!can(user, "trainers:view")) notFound()
 
   const [trainers, availableUsers] = await Promise.all([
     prisma.trainer.findMany({

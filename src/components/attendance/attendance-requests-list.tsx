@@ -42,6 +42,7 @@ type RequestRow = {
   id: string
   memberId: string
   memberName: string
+  memberCode: string | null
   memberActive: boolean
   dayKey: string
   requestedAt: string
@@ -148,6 +149,11 @@ export function AttendanceRequestsList({
                       >
                         {request.memberName}
                       </Link>
+                      {request.memberCode && (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {request.memberCode}
+                        </span>
+                      )}
                       <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
                       {request.memberActive ? null : (
                         <StatusBadge tone="destructive">Not active</StatusBadge>

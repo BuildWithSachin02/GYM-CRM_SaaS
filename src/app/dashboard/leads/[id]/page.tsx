@@ -28,6 +28,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function LeadDetailPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
+  if (!can(user, "leads:view")) notFound()
 
   const lead = await prisma.lead.findFirst({
     where: { id, organizationId: user.organizationId, deletedAt: null },

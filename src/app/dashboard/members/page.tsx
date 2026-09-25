@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
@@ -22,6 +23,7 @@ export default async function MembersPage({
   searchParams: SearchParams
 }) {
   const user = await requireUser()
+  if (!can(user, "members:view")) notFound()
   const params = await searchParams
 
   const q = params.q?.trim() || ""
@@ -39,6 +41,7 @@ export default async function MembersPage({
     where.OR = [
       { firstName: { contains: q, mode: "insensitive" } },
       { lastName: { contains: q, mode: "insensitive" } },
+      { memberCode: { contains: q, mode: "insensitive" } },
       { phone: { contains: q, mode: "insensitive" } },
       { email: { contains: q, mode: "insensitive" } },
     ]
@@ -56,6 +59,7 @@ export default async function MembersPage({
       take: pageSize,
       select: {
         id: true,
+        memberCode: true,
         firstName: true,
         lastName: true,
         phone: true,

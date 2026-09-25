@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 
 export default async function PlansPage() {
   const user = await requireUser()
+  if (!can(user, "plans:view")) notFound()
 
   const plans = await prisma.membershipPlan.findMany({
     where: { organizationId: user.organizationId },

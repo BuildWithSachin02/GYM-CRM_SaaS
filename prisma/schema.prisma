@@ -178,6 +178,7 @@ model Organization {
   auditLogs          AuditLog[]
   attendanceRequests AttendanceRequest[]
   memberDevices      MemberDevice[]
+  userPermissions    UserPermission[]
 
   @@index([status])
 }
@@ -216,10 +217,19 @@ model User {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   name           String
   email          String       @unique
+  // Optional organization-scoped display/alias handle. The login identifier is
+  // ALWAYS `email`; username is never used for authentication. Unique per org
+  // (multiple NULLs are allowed by the DB).
+  username       String?
   passwordHash   String
   phone          String?
   role           UserRole     @default(RECEPTIONIST)
   status         UserStatus   @default(ACTIVE)
+  // Bumped on deactivation, password change/reset, role change and significant
+  // permission changes. The signed session cookie embeds this value; a stale
+  // session (lower version) is rejected on the next request, actively revoking
+  // existing sessions without a session table.
+  sessionVersion Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -235,10 +245,38 @@ model User {
   auditLogs                 AuditLog[]
   approvedAttendanceRequests AttendanceRequest[]  @relation("ApprovedAttendanceRequests")
   rejectedAttendanceRequests AttendanceRequest[]  @relation("RejectedAttendanceRequests")
+  userPermissions           UserPermission[]
 
+  @@unique([organizationId, username])
   @@index([organizationId])
   @@index([organizationId, role])
   @@index([organizationId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Per-user permission overrides (Users & Access Control)
+//
+// Role defaults are the baseline; these rows override them per user. A row
+// stores granted=true/false for a specific permission key. Precedence:
+// OWNER full-access > explicit row > role default. Permission keys are
+// validated server-side against the catalog in src/lib/permissions.ts — unknown
+// client-provided strings are rejected before any row is written.
+// ---------------------------------------------------------------------------
+
+model UserPermission {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission     String
+  granted        Boolean
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, userId, permission])
+  @@index([organizationId])
+  @@index([organizationId, userId])
 }
 
 model Trainer {
@@ -272,6 +310,9 @@ model Member {
   location              GymLocation? @relation("MemberLocations", fields: [primaryLocationId], references: [id], onDelete: SetNull)
   firstName             String
   lastName              String
+  // Org-scoped, human-facing identifier ("MEM-0001"). Display only — the
+  // UUID `id` remains the canonical identity and every FK stays a UUID.
+  memberCode            String
   phone                 String
   email                 String?
   gender                Gender?
@@ -303,7 +344,10 @@ model Member {
   memberDevices  MemberDevice[]
 
   @@unique([organizationId, email])
-  @@unique([organizationId, phone])
+  // Phone is deliberately NOT org-unique: family members may share a number.
+  // Same-name + same-phone members produce a STRONG duplicate WARNING (never
+  // a block) at the application layer.
+  @@unique([organizationId, memberCode])
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, trainerId])

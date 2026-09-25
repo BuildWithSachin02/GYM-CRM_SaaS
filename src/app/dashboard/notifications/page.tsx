@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
+import { can } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 
 import { NotificationList } from "@/components/notifications/notification-list"
@@ -11,6 +13,7 @@ export const metadata: Metadata = {
 
 export default async function NotificationsPage() {
   const user = await requireUser()
+  if (!can(user, "notifications:view")) notFound()
 
   const notifications = await prisma.notification.findMany({
     where: { organizationId: user.organizationId, userId: user.id },

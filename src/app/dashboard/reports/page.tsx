@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
+import { can } from "@/lib/permissions"
 import { resolveReportRange } from "@/lib/analytics-core"
 import { dayKeyInTimeZone } from "@/lib/memberships"
 import { getReportsData } from "@/lib/domain/reports"
@@ -23,6 +25,7 @@ export default async function ReportsServerPage({
   searchParams: SearchParams
 }) {
   const user = await requireUser()
+  if (!can(user, "reports:view")) notFound()
   const params = await searchParams
 
   const query = resolveReportRange({

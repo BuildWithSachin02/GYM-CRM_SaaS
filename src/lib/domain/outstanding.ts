@@ -36,7 +36,7 @@ export const loadOutstandingSource = cache(async (organizationId: string) => {
         status: true,
         amountMinor: true,
         expectedPaymentDate: true,
-        member: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        member: { select: { id: true, firstName: true, lastName: true, phone: true, memberCode: true } },
         plan: { select: { name: true } },
       },
     }),

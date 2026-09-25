@@ -65,6 +65,7 @@ type MemberFormValues = z.infer<typeof memberFormSchema>
 type MemberFormProps = {
   member?: {
     id: string
+    memberCode?: string | null
     firstName: string
     lastName: string
     phone: string
@@ -129,7 +130,20 @@ export function MemberForm({ member, trigger }: MemberFormProps) {
         : await createMember(memberInput)
 
       if (result.success) {
-        toast.success(isEdit ? "Member updated" : "Member created")
+        const codeSuffix = result.data.memberCode
+          ? ` — ${result.data.memberCode}`
+          : ""
+        toast.success(
+          `${isEdit ? "Member updated" : "Member created"}${codeSuffix}`
+        )
+        if (result.warnings && result.warnings.length > 0) {
+          const summary = result.warnings.map((w) =>
+            w.strength === "strong"
+              ? `Possible duplicate: ${w.name} (${w.memberCode ?? "no code"})`
+              : `Another member shares this name: ${w.name}`
+          )
+          toast.warning(summary.join(". "))
+        }
         setOpen(false)
         form.reset()
         router.refresh()
@@ -177,19 +191,19 @@ export function MemberForm({ member, trigger }: MemberFormProps) {
             <FormServerError>{serverError}</FormServerError>
 
             <div className="grid grid-cols-2 gap-3">
-              <FormField
-                control={form.control}
-                name="firstName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>First Name *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="John" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+<FormField
+              control={form.control}
+              name="firstName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>First Name *</FormLabel>
+                  <FormControl>
+                    <Input placeholder="John" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
               <FormField
                 control={form.control}
                 name="lastName"
@@ -204,6 +218,20 @@ export function MemberForm({ member, trigger }: MemberFormProps) {
                 )}
               />
             </div>
+
+            <FormItem>
+              <FormLabel>Member Code</FormLabel>
+              <FormControl>
+                <Input
+                  value={isEdit ? member?.memberCode ?? "" : "Auto-generated"}
+                  disabled
+                  readOnly
+                />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                Assigned automatically. Used for display and search only.
+              </p>
+            </FormItem>
 
             <FormField
               control={form.control}

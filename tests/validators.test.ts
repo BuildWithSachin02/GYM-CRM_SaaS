@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   appointmentSchema,
   appointmentStatusSchema,
+  changePasswordSchema,
   leadConvertSchema,
   leadSchema,
   loginSchema,
@@ -12,7 +13,9 @@ import {
   membershipRenewSchema,
   orgSettingsSchema,
   paymentSchema,
+  permissionUpdateSchema,
   planSchema,
+  resetPasswordSchema,
   staffSchema,
   staffUpdateSchema,
   taskSchema,
@@ -117,8 +120,10 @@ test("staffSchema requires password of at least 8 chars", () => {
   assert.equal(good.success, true)
 })
 
-test("staffUpdateSchema allows optional empty password reset", () => {
-  const res = staffUpdateSchema.safeParse({
+test("staffUpdateSchema allows editing details without a password field", () => {
+  // Passwords are deliberately NOT part of user editing — they go through the
+  // dedicated changeOwnPassword/resetPassword actions in src/lib/actions/users.ts.
+  const bad = staffUpdateSchema.safeParse({
     staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
     name: "Receptionist",
     phone: null,
@@ -126,7 +131,124 @@ test("staffUpdateSchema allows optional empty password reset", () => {
     status: "ACTIVE",
     password: null,
   })
+  assert.equal(bad.success, false, "a password field must be rejected")
+  const good = staffUpdateSchema.safeParse({
+    staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    name: "Receptionist",
+    phone: null,
+    role: "RECEPTIONIST",
+    status: "ACTIVE",
+  })
+  assert.equal(good.success, true)
+})
+
+test("staffSchema accepts an optional org-scoped username and normalizes it", () => {
+  const res = staffSchema.safeParse({
+    name: "Receptionist",
+    email: "reception@kingsgym.com",
+    phone: null,
+    role: "RECEPTIONIST",
+    password: "longenough",
+    username: "  Tanvi.fitness ",
+  })
   assert.equal(res.success, true)
+  assert.equal(res.data.username, "tanvi.fitness")
+  const invalid = staffSchema.safeParse({
+    name: "Receptionist",
+    email: "reception@kingsgym.com",
+    phone: null,
+    role: "RECEPTIONIST",
+    password: "longenough",
+    username: "ab",
+  })
+  assert.equal(invalid.success, false)
+})
+
+test("permissionUpdateSchema rejects unknown permission keys", () => {
+  const bad = permissionUpdateSchema.safeParse({
+    staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    permissions: { "system:root": true },
+  })
+  assert.equal(bad.success, false)
+  const good = permissionUpdateSchema.safeParse({
+    staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    permissions: { "members:view": true, "payments:record": false },
+  })
+  assert.equal(good.success, true)
+})
+
+test("staffSchema accepts an optional creation-time permission customization", () => {
+  const res = staffSchema.safeParse({
+    name: "Receptionist",
+    email: "reception@kingsgym.com",
+    phone: null,
+    role: "RECEPTIONIST",
+    password: "longenough",
+    permissions: {
+      "members:view": true,
+      "members:create": false,
+      "payments:record": false,
+      "reports:view": false,
+    },
+  })
+  assert.equal(res.success, true)
+  const parsed = res.data
+  assert.ok(parsed.permissions)
+  assert.equal(parsed.permissions["members:view"], true)
+  assert.equal(parsed.permissions["members:create"], false)
+  assert.equal(parsed.permissions["payments:record"], false)
+})
+
+test("staffSchema rejects unknown permission keys in creation customization", () => {
+  const bad = staffSchema.safeParse({
+    name: "Receptionist",
+    email: "reception@kingsgym.com",
+    phone: null,
+    role: "RECEPTIONIST",
+    password: "longenough",
+    permissions: { "members:view": true, "system:root": true },
+  })
+  assert.equal(bad.success, false)
+})
+
+test("staffSchema without permissions still parses (role defaults baseline)", () => {
+  const res = staffSchema.safeParse({
+    name: "Receptionist",
+    email: "reception@kingsgym.com",
+    phone: null,
+    role: "TRAINER",
+    password: "longenough",
+  })
+  assert.equal(res.success, true)
+  assert.equal(res.data.permissions, undefined)
+})
+
+test("changePasswordSchema requires matching confirmation", () => {
+  const bad = changePasswordSchema.safeParse({
+    currentPassword: "old",
+    newPassword: "newpassword1",
+    confirmPassword: "different",
+  })
+  assert.equal(bad.success, false)
+  const good = changePasswordSchema.safeParse({
+    currentPassword: "old",
+    newPassword: "newpassword1",
+    confirmPassword: "newpassword1",
+  })
+  assert.equal(good.success, true)
+})
+
+test("resetPasswordSchema requires a strong new password", () => {
+  const bad = resetPasswordSchema.safeParse({
+    staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    newPassword: "short",
+  })
+  assert.equal(bad.success, false)
+  const good = resetPasswordSchema.safeParse({
+    staffId: "e6f5a048-9294-45cb-b0cd-000000000001",
+    newPassword: "longenough",
+  })
+  assert.equal(good.success, true)
 })
 
 test("trainerSchema requires valid staff userId", () => {

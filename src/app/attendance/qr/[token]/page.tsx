@@ -49,7 +49,7 @@ export default async function QrTokenPage({ params }: QrTokenPageProps) {
       status: "ACTIVE",
       deletedAt: null,
     },
-    select: { id: true, firstName: true, lastName: true, phone: true },
+    select: { id: true, firstName: true, lastName: true, phone: true, memberCode: true },
     orderBy: { firstName: "asc" },
   })
 
@@ -99,7 +99,7 @@ export default async function QrTokenPage({ params }: QrTokenPageProps) {
       maskedPhone: maskPhone(m.phone),
       membershipPlanName: planLabel,
     }
-    return { id: m.id, firstName: m.firstName, lastName: m.lastName, identity }
+    return { id: m.id, firstName: m.firstName, lastName: m.lastName, memberCode: m.memberCode ?? null, identity }
   })
 
   // Trusted device present and, crucially, belonging to the SAME gym as this

@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { notFound } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
@@ -29,6 +30,7 @@ export default async function AppointmentsPage({
   searchParams: SearchParams
 }) {
   const user = await requireUser()
+  if (!can(user, "appointments:view")) notFound()
   const params = await searchParams
 
   const statusFilter = params.status?.trim() || ""
@@ -68,7 +70,7 @@ export default async function AppointmentsPage({
     prisma.member.findMany({
       where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
       orderBy: { firstName: "asc" },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, memberCode: true },
     }),
     prisma.lead.findMany({
       where: { organizationId: user.organizationId, deletedAt: null, stage: { not: "CONVERTED" } },
@@ -99,6 +101,7 @@ export default async function AppointmentsPage({
   const serializedMembers = members.map((m) => ({
     id: m.id,
     name: `${m.firstName} ${m.lastName}`.trim(),
+    memberCode: m.memberCode,
   }))
   const serializedLeads = leads.map((l) => ({ id: l.id, name: l.name }))
   const serializedTrainers = trainers.map((t) => ({ id: t.id, name: t.user.name }))

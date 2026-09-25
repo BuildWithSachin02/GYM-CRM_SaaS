@@ -11,6 +11,7 @@ import {
   CreditCard,
   Edit,
   FileText,
+  Hash,
   Mail,
   MapPin,
   Phone,
@@ -60,6 +61,7 @@ import { PaymentForm } from "@/components/payments/payment-form"
 type MemberProfileProps = {
   member: {
     id: string
+    memberCode: string
     firstName: string
     lastName: string
     phone: string
@@ -362,6 +364,7 @@ export function MemberProfile({
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                    <InfoRow icon={Hash} label="Member Code" value={member.memberCode} />
                     <InfoRow icon={Phone} label="Phone" value={member.phone} />
                     <InfoRow icon={Mail} label="Email" value={member.email ?? "—"} />
                     <InfoRow

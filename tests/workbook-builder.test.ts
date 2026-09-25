@@ -31,6 +31,7 @@ function counts(): SummaryCounts {
 function memberRow(id: string): ExportRowMap["members"] {
   return {
     id,
+    memberCode: "MEM-0001",
     firstName: "Aarav",
     lastName: "Sharma",
     phone: "+91 90000 00000",
@@ -221,6 +222,7 @@ function financialRow(memberId: string, paidMinor: number): MemberFinancialSumma
   return {
     memberId,
     memberName: "Aarav Sharma",
+    memberCode: "MEM-0001",
     currentPlan: "Annual Gold",
     currentStatus: "ACTIVE",
     currentStartKey: "2026-09-01",

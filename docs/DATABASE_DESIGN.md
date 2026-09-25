@@ -100,7 +100,7 @@ Every entity marked *org-owned* carries a non-null `organization_id`. The tenant
 - **UserRole**: id (UUID) PK, user_id → User, role_id → Role, scope (native enum: `organization`/`location`), location_id (nullable; required when scope=location; CHECK constraint per D-12), created/updated.
 
 ### 4.5 Member — org-owned
-- id (UUID) PK, organization_id → Organization, primary_location_id → Location (**nullable**), name, email (org-scoped), phone (org-scoped), photo_url (nullable), status (`active`/`frozen`/`inactive`), signup_source (nullable, canonical `LeadSource` enum per D-13), deleted_at (nullable), created/updated.
+- id (UUID) PK, organization_id → Organization, primary_location_id → Location (**nullable**), **member_code (unique per org, display-only, auto-assigned — `MEM-0001`; never recycled)**, name (first/last), email (org-scoped), phone (org-scoped, **not unique**), photo_url (nullable), status (`active`/`frozen`/`inactive`), signup_source (nullable, canonical `LeadSource` enum per D-13), deleted_at (nullable), created/updated.
 - Relationship to plans is via **Membership**.
 
 ### 4.6 Trainer — org-owned
@@ -191,7 +191,7 @@ Organization 1—n AuditLog
 
 - Composite index on every org-owned table prefixed by `organization_id`.
 - **User**: unique `email` (global).
-- **Member**: unique `(organization_id, email)` where email non-null (partial); unique `(organization_id, phone)` where phone non-null (partial); `(organization_id, status)`; `(organization_id, primary_location_id)`.
+- **Member**: unique `(organization_id, email)` where email non-null (partial); **unique `(organization_id, member_code)`** (the org-scoped, display-only Member Code); phone is **not** unique — even within an org (family members share phones; see D-02); `(organization_id, status)`; `(organization_id, primary_location_id)`.
 - **Membership**: `(organization_id, status)`; `(organization_id, member_id)`; **partial unique** for one active per (member, plan): `(organization_id, member_id, plan_id)` WHERE status IN (`draft`,`active`,`frozen`).
 - **MembershipFreeze**: `(organization_id, membership_id)`; `(organization_id, frozen_from, frozen_to)` for reporting.
 - **Payment**: `(organization_id, membership_id)`; `(organization_id, member_id)`; `(organization_id, captured_at)`.
@@ -210,7 +210,7 @@ Organization 1—n AuditLog
 - `Lead.converted_member_id` unique (a member maps to at most one lead).
 - `AutomationJob (organization_id, rule_id, dedupe_key)` unique (idempotency).
 - Partial unique for active membership per (member, plan) (see §6).
-- Partial unique for org-scoped Member/Lead email/phone duplicate detection.
+- Partial unique for org-scoped Member email / Lead email + phone duplicate detection, and unique `(organization_id, member_code)` for the Member Code. Member phone carries **no** uniqueness constraint.
 
 ### Delete behavior (all explicit)
 - Use **RESTRICT** (default) for all important historical references so financial, attendance, and audit history cannot vanish:

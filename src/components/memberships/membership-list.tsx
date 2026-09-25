@@ -37,6 +37,7 @@ type SerializedMembership = {
   id: string
   memberId: string
   memberName: string
+  memberCode: string | null
   planId: string
   planName: string
   startDate: string
@@ -69,7 +70,13 @@ type MembershipListProps = {
   totalPages: number
   filters: { q: string; status: string; page: number }
   stats: { totalActive: number; expiringIn7Days: number; expired: number }
-  members: { id: string; firstName: string; lastName: string }[]
+  members: {
+    id: string
+    firstName: string
+    lastName: string
+    memberCode?: string | null
+    phone?: string | null
+  }[]
   plans: { id: string; name: string; priceMinor: number; durationDays: number }[]
   canManage: boolean
   /** Business date (YYYY-MM-DD) in the org's timezone. */
@@ -276,6 +283,11 @@ export function MembershipList({
                         >
                           {m.memberName}
                         </Link>
+                        {m.memberCode && (
+                          <span className="ml-2 font-mono text-xs text-muted-foreground">
+                            {m.memberCode}
+                          </span>
+                        )}
                         {m.historyCount > 1 && (
                           <span className="ml-2 text-xs text-muted-foreground">
                             {m.historyCount} records

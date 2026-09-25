@@ -77,6 +77,7 @@ test("every export sheet defines non-empty, unique columns", () => {
 test("members row maps one cell per header and redacts secrets", () => {
   const row: ExportRowMap["members"] = {
     id: "mem-1",
+    memberCode: "MEM-0001",
     firstName: "Aarav",
     lastName: "Sharma",
     phone: "+91 90000 00000",
@@ -99,10 +100,11 @@ test("members row maps one cell per header and redacts secrets", () => {
   assert.equal(cells.length, EXPORT_COLUMNS.members.length)
   assert.equal(cells[0], "mem-1")
   assert.equal(cells[3], "Aarav Sharma")
-  assert.equal(cells[14], "ACTIVE")
-  assert.equal(dateCell(cells[7]).toISOString(), "2026-09-21T00:00:00.000Z") // DoB local day
-  assert.equal(cells[11], "Ravi Verma")
-  assert.equal(kindOf(cells[17]), "datetime")
+  assert.equal(cells[4], "MEM-0001")
+  assert.equal(cells[15], "ACTIVE")
+  assert.equal(dateCell(cells[8]).toISOString(), "2026-09-21T00:00:00.000Z") // DoB local day
+  assert.equal(cells[12], "Ravi Verma")
+  assert.equal(kindOf(cells[18]), "datetime")
 })
 
 test("memberships row renders money as a decimal, duration, and joins names", () => {
@@ -119,24 +121,25 @@ test("memberships row renders money as a decimal, duration, and joins names", ()
     notes: null,
     createdAt: new Date(hoursAt(9)),
     updatedAt: new Date(hoursAt(9)),
-    member: { firstName: "Aarav", lastName: "Sharma", phone: null },
+    member: { firstName: "Aarav", lastName: "Sharma", phone: null, memberCode: "MEM-0001" },
     plan: { name: "Annual Gold", priceMinor: 250000 },
     _finance: { paidMinor: 50000, outstandingMinor: 150000, expectedPaymentKey: "2026-09-25", status: "PENDING" },
   }
   const cells = mapExportRow("memberships", row, TZ)
   assert.equal(cells.length, EXPORT_COLUMNS.memberships.length)
   assert.equal(cells[2], "Aarav Sharma")
-  assert.equal(cells[4], "Annual Gold")
-  assert.equal(cells[5], 2500) // plan price ₹2,500 (comparison field, not revenue)
-  assert.equal(cells[8], 29) // inclusive period length in calendar days
-  assert.equal(cells[10], 2000) // 200000 paise → 2000.00 charged amount
+  assert.equal(cells[3], "MEM-0001")
+  assert.equal(cells[5], "Annual Gold")
+  assert.equal(cells[6], 2500) // plan price ₹2,500 (comparison field, not revenue)
+  assert.equal(cells[9], 29) // inclusive period length in calendar days
+  assert.equal(cells[11], 2000) // 200000 paise → 2000.00 charged amount
   // Service-enriched balance columns: RECORDED-paid vs remaining (never revenue).
-  assert.equal(cells[11], 500) // ₹500 paid so far
-  assert.equal(cells[12], 1500) // ₹1,500 outstanding
-  assert.equal(dateCell(cells[13]).toISOString(), "2026-09-25T00:00:00.000Z") // expected date local day
-  assert.equal(cells[14], "PENDING")
-  assert.equal(cells[15], "Yes")
-  assert.equal(dateCell(cells[6]).toISOString(), "2026-09-01T00:00:00.000Z")
+  assert.equal(cells[12], 500) // ₹500 paid so far
+  assert.equal(cells[13], 1500) // ₹1,500 outstanding
+  assert.equal(dateCell(cells[14]).toISOString(), "2026-09-25T00:00:00.000Z") // expected date local day
+  assert.equal(cells[15], "PENDING")
+  assert.equal(cells[16], "Yes")
+  assert.equal(dateCell(cells[7]).toISOString(), "2026-09-01T00:00:00.000Z")
 })
 
 test("payments row carries plan context, method, status and money (per-transaction)", () => {
@@ -153,7 +156,7 @@ test("payments row carries plan context, method, status and money (per-transacti
     notes: "Initial payment",
     createdAt: new Date(hoursAt(12)),
     updatedAt: new Date(hoursAt(13)),
-    member: { firstName: "Aarav", lastName: "Sharma" },
+    member: { firstName: "Aarav", lastName: "Sharma", memberCode: "MEM-0001" },
     membership: {
       id: "ms-1",
       status: "ACTIVE",
@@ -165,15 +168,16 @@ test("payments row carries plan context, method, status and money (per-transacti
   }
   const cells = mapExportRow("payments", row, TZ)
   assert.equal(cells.length, EXPORT_COLUMNS.payments.length)
-  assert.equal(cells[9], "Annual Gold")
-  assert.equal(cells[10], "plan-1")
-  assert.equal(cells[4], 500) // 50000 paise → 500.00
-  assert.equal(kindOf(cells[4]), "number")
-  assert.equal(cells[6], "UPI")
-  assert.equal(cells[7], "RECORDED")
-  assert.equal(dateCell(cells[11]).toISOString(), "2026-09-01T00:00:00.000Z")
-  assert.equal(cells[13], "TXN-9001")
-  assert.equal(cells[15], "Receptionist")
+  assert.equal(cells[3], "MEM-0001")
+  assert.equal(cells[10], "Annual Gold")
+  assert.equal(cells[11], "plan-1")
+  assert.equal(cells[5], 500) // 50000 paise → 500.00
+  assert.equal(kindOf(cells[5]), "number")
+  assert.equal(cells[7], "UPI")
+  assert.equal(cells[8], "RECORDED")
+  assert.equal(dateCell(cells[12]).toISOString(), "2026-09-01T00:00:00.000Z")
+  assert.equal(cells[14], "TXN-9001")
+  assert.equal(cells[16], "Receptionist")
 })
 
 test("payments row keeps an unlinked membership empty-safe", () => {
@@ -195,9 +199,9 @@ test("payments row keeps an unlinked membership empty-safe", () => {
     recordedBy: { name: "Owner" },
   }
   const cells = mapExportRow("payments", row, TZ)
-  assert.equal(cells[9], "")
   assert.equal(cells[10], "")
   assert.equal(cells[11], "")
+  assert.equal(cells[12], "")
 })
 
 test("attendance row keeps the org-local dayKey, source and optional QR label", () => {
@@ -207,18 +211,19 @@ test("attendance row keeps the org-local dayKey, source and optional QR label", 
     dayKey: "2026-09-21",
     checkedInAt: new Date(hoursAt(23)),
     source: "QR_SESSION",
-    member: { firstName: "Aarav", lastName: "Sharma" },
+    member: { firstName: "Aarav", lastName: "Sharma", memberCode: "MEM-0001" },
     location: null,
     qrSession: { id: "qr-9", label: "Main desk" },
   }
   const cells = mapExportRow("attendance", row, TZ)
   assert.equal(cells.length, EXPORT_COLUMNS.attendance.length)
-  assert.equal(dateCell(cells[3]).toISOString(), "2026-09-21T00:00:00.000Z")
-  assert.equal(dateCell(cells[4]).toISOString(), "2026-09-22T04:30:00.000Z") // 23:00 UTC → 04:30 IST
-  assert.equal(cells[5], "")
-  assert.equal(cells[6], "QR_SESSION")
-  assert.equal(cells[7], "Main desk")
-  assert.equal(cells[8], "qr-9")
+  assert.equal(cells[3], "MEM-0001")
+  assert.equal(dateCell(cells[4]).toISOString(), "2026-09-21T00:00:00.000Z")
+  assert.equal(dateCell(cells[5]).toISOString(), "2026-09-22T04:30:00.000Z") // 23:00 UTC → 04:30 IST
+  assert.equal(cells[6], "")
+  assert.equal(cells[7], "QR_SESSION")
+  assert.equal(cells[8], "Main desk")
+  assert.equal(cells[9], "qr-9")
 })
 
 test("leads row maps owner, plan, conversion and timestamps", () => {
@@ -269,9 +274,11 @@ test("appointments and tasks keep optional participants empty-safe", () => {
   const aptCells = mapExportRow("appointments", appointment, TZ)
   assert.equal(aptCells.length, EXPORT_COLUMNS.appointments.length)
   assert.equal(aptCells[1], "")
-  assert.equal(aptCells[3], "lead-2")
-  assert.equal(aptCells[4], "Neha Gupta")
-  assert.equal(aptCells[10], "Main floor")
+  assert.equal(aptCells[2], "")
+  assert.equal(aptCells[3], "")
+  assert.equal(aptCells[4], "lead-2")
+  assert.equal(aptCells[5], "Neha Gupta")
+  assert.equal(aptCells[11], "Main floor")
 
   const task: ExportRowMap["tasks"] = {
     id: "task-1",
@@ -283,7 +290,7 @@ test("appointments and tasks keep optional participants empty-safe", () => {
     updatedAt: new Date(hoursAt(12)),
     assignee: null,
     createdBy: null,
-    member: { id: "mem-1", firstName: "Aarav", lastName: "Sharma" },
+    member: { id: "mem-1", firstName: "Aarav", lastName: "Sharma", memberCode: "MEM-0001" },
     lead: null,
   }
   const taskCells = mapExportRow("tasks", task, TZ)
@@ -291,6 +298,7 @@ test("appointments and tasks keep optional participants empty-safe", () => {
   assert.equal(taskCells[1], "Call Neha")
   assert.equal(taskCells[7], "mem-1")
   assert.equal(taskCells[8], "Aarav Sharma")
+  assert.equal(taskCells[9], "MEM-0001")
 })
 
 test("QR session and lead activity rows map cleanly", () => {
@@ -379,6 +387,7 @@ test("financial summary row maps aggregated values with money conversion", () =>
     {
       memberId: "mem-1",
       memberName: "Aarav Sharma",
+      memberCode: "MEM-0001",
       currentPlan: "Annual Gold",
       currentStatus: "ACTIVE",
       currentStartKey: "2026-09-01",
@@ -393,14 +402,15 @@ test("financial summary row maps aggregated values with money conversion", () =>
   )
   assert.equal(cells.length, FINANCIAL_SUMMARY_COLUMNS.length)
   assert.equal(cells[0], "mem-1")
-  assert.equal(cells[2], "Annual Gold")
-  assert.equal(cells[3], "ACTIVE")
-  assert.equal(cells[6], 10000) // 1,000,000 paise → ₹10,000
-  assert.equal(cells[7], 10000)
-  assert.equal(cells[8], 3)
-  assert.equal(cells[9], 3000) // latest payment ₹3,000
-  assert.equal(cells[10] && typeof cells[10] === "object" ? dateCell(cells[10]).toISOString() : "", "2026-09-18T00:00:00.000Z")
-  assert.equal(cells[11], "UPI, CASH")
+  assert.equal(cells[2], "MEM-0001")
+  assert.equal(cells[3], "Annual Gold")
+  assert.equal(cells[4], "ACTIVE")
+  assert.equal(cells[7], 10000) // 1,000,000 paise → ₹10,000
+  assert.equal(cells[8], 10000)
+  assert.equal(cells[9], 3)
+  assert.equal(cells[10], 3000) // latest payment ₹3,000
+  assert.equal(cells[11] && typeof cells[11] === "object" ? dateCell(cells[11]).toISOString() : "", "2026-09-18T00:00:00.000Z")
+  assert.equal(cells[12], "UPI, CASH")
 })
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ export type Member = {
   id: string
   firstName: string
   lastName: string
+  memberCode?: string | null
   /** Server-derived identity summary for the confirmation screen. */
   identity: IdentitySummary
 }
@@ -316,7 +317,12 @@ export function QrCheckin({
                 className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
               >
                 <UserCheck className="mr-2 size-4 text-muted-foreground" />
-                {m.firstName} {m.lastName}
+                <span>{m.firstName} {m.lastName}</span>
+                {m.memberCode && (
+                  <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                    {m.memberCode}
+                  </span>
+                )}
               </button>
             ))
           )}

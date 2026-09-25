@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import { Suspense } from "react"
 import {
@@ -34,6 +35,7 @@ export const metadata: Metadata = {
 export default async function DashboardPage() {
   const user = await requireUser()
   const canManage = can(user, "members:create")
+  if (!can(user, "dashboard:view")) notFound()
 
   return (
     <div className="space-y-6">

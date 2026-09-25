@@ -8,6 +8,10 @@ import { z } from "zod"
 import { toast } from "sonner"
 
 import { correctAttendanceMember } from "@/lib/actions/attendance-requests"
+import {
+  memberSelectionLabel,
+  memberSelectionSublabel,
+} from "@/lib/member-code"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -32,7 +36,13 @@ import {
 import { EntityCombobox } from "@/components/ui/entity-combobox"
 import { Textarea } from "@/components/ui/textarea"
 
-export type CorrectionMember = { id: string; firstName: string; lastName: string }
+export type CorrectionMember = {
+  id: string
+  firstName: string
+  lastName: string
+  memberCode?: string | null
+  phone?: string | null
+}
 
 const correctionFormSchema = z.object({
   memberId: z.string().uuid("Please select the correct member"),
@@ -126,7 +136,8 @@ export function AttendanceCorrectionDialog({
                       onValueChange={field.onChange}
                       options={candidates.map((m) => ({
                         id: m.id,
-                        label: `${m.firstName} ${m.lastName}`.trim(),
+                        label: memberSelectionLabel(m),
+                        sublabel: memberSelectionSublabel(m),
                       }))}
                       placeholder="Search or select the member"
                       emptyText="No members found."

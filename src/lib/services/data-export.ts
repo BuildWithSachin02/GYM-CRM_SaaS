@@ -108,7 +108,7 @@ async function fetchBatch(
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          member: { select: { firstName: true, lastName: true, phone: true } },
+          member: { select: { firstName: true, lastName: true, phone: true, memberCode: true } },
           plan: { select: { name: true, priceMinor: true } },
         },
       })) as unknown as ExportRowMap["memberships"][]
@@ -128,7 +128,7 @@ async function fetchBatch(
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          member: { select: { firstName: true, lastName: true } },
+          member: { select: { firstName: true, lastName: true, memberCode: true } },
           membership: {
             select: {
               id: true,
@@ -149,7 +149,7 @@ async function fetchBatch(
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          member: { select: { firstName: true, lastName: true } },
+          member: { select: { firstName: true, lastName: true, memberCode: true } },
           location: { select: { name: true } },
           qrSession: { select: { id: true, label: true } },
         },
@@ -176,7 +176,7 @@ async function fetchBatch(
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          member: { select: { id: true, firstName: true, lastName: true } },
+          member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
           lead: { select: { id: true, name: true } },
           trainer: { select: { user: { select: { name: true } } } },
           staff: { select: { name: true } },
@@ -193,7 +193,7 @@ async function fetchBatch(
         include: {
           assignee: { select: { name: true } },
           createdBy: { select: { name: true } },
-          member: { select: { id: true, firstName: true, lastName: true } },
+          member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
           lead: { select: { id: true, name: true } },
         },
       })) as unknown as ExportRowMap["tasks"][]
@@ -404,10 +404,14 @@ async function loadFinancialAggregation(args: BuildExportArgs): Promise<{
   const idList = [...ids]
   const memberRows = await prisma.member.findMany({
     where: { organizationId, id: { in: idList } },
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, memberCode: true },
   })
   const memberNames = new Map<string, string>()
-  for (const m of memberRows) memberNames.set(m.id, `${m.firstName} ${m.lastName}`.trim())
+  const memberCodes = new Map<string, string | null>()
+  for (const m of memberRows) {
+    memberNames.set(m.id, `${m.firstName} ${m.lastName}`.trim())
+    memberCodes.set(m.id, m.memberCode)
+  }
 
   const memberships = (await prisma.membership.findMany({
     where: { organizationId, memberId: { in: idList } },
@@ -436,6 +440,7 @@ async function loadFinancialAggregation(args: BuildExportArgs): Promise<{
 
   const rows = buildMemberFinancialRows({
     memberNames,
+    memberCodes,
     memberships,
     payments,
     membershipRange: range.mode === "custom" ? { fromKey: range.fromKey, toKey: range.toKey } : null,

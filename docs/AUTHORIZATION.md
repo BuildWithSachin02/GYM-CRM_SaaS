@@ -2,94 +2,79 @@
 
 ## 1. Authorization model
 
-**Server-side RBAC.** The client (browser) never decides who may act. Every read/write is re-authorized from the server's own view of the authenticated user, their roles, and their scopes.
+**Server-side RBAC with per-user overrides.** The client (browser) never decides who may act. Every read/write is re-authorized from the server's own view of the authenticated `User`, their single `role`, their explicit `UserPermission` overrides, and their `Organization` (tenant).
 
 Three concepts combine:
 
-1. **Identity** — the authenticated User derived from the session (see `SECURITY.md`).
-2. **Tenancy** — the Organization derived from the session, not from the client.
-3. **Permission** — a granular, alphabetical-name activity (e.g. `members:create`, `payments:read`).
+1. **Identity** — the authenticated user derived from the session (`getCurrentUser`, see `SECURITY.md`).
+2. **Tenancy** — the `Organization` resolved from the session, never from the client.
+3. **Permission** — a granular activity key, e.g. `members:create`, `staff:manage` (full catalog in `src/lib/permissions.ts`).
 
 ## 2. Role model
 
-A **Role** is a named set of permissions. Roles are either system-provided defaults or organization-defined.
+A **Role** is a named baseline permission set. Every user has exactly **one** role.
 
-Default roles:
+| Role | Baseline (typ.) | Notes |
+|------|-----------------|-------|
+| `OWNER` | Full catalog, unconditional | Never narrowable by overrides |
+| `ADMIN` | All operational modules + `staff:manage`, `settings:manage` | Cannot create/promote OWNER |
+| `RECEPTIONIST` | Front-desk modules | No plans/trainers/staff management |
+| `TRAINER` | View-most modules | No member create/update, no payments |
 
-| Role | Scope | Typical permissions |
-|------|-------|---------------------|
-| Owner | Organization | All permissions, including organization:settings and user:manage |
-| Manager | Organization / Location | All operational modules except organization:settings and user:manage |
-| Front Desk / Staff | Location | members, payments:record, attendance, leads, appointments, follow-ups, notifications:read |
-| Trainer | Organization / Location | appointments:self, members:read (limited), attendance:read |
+Role defaults live in `ROLE_PERMISSIONS` in `src/lib/permissions.ts`. See `src/lib/user-access.ts` for the decision helpers.
 
-A role is granted to a user via **UserRole** with an explicit **scope**:
+## 3. Permission evaluation
 
-- `scope = organization` ⇒ applies organization-wide.
-- `scope = location` ⇒ restricted to a specific `location_id`.
+Effective permission set per user, computed **server-side on every request** by `effectivePermissions(role, overrides)`:
 
-A user may hold multiple roles; the effective permission set is the union across all their roles and scopes. For any action, the **most restrictive scope that grants the permission** applies; a location-scoped grant only authorizes within that location's data.
+```
+OWNER role        → full catalog (overrides ignored)
+otherwise         → role defaults, then each override row applied:
+                     granted=true  adds the permission
+                     granted=false removes it
+```
 
-## 3. Permission catalog (representative)
+Precedence: **OWNER full-access > explicit `UserPermission` row > role default.**
 
-Namespaces: `organization`, `user`, `membership.plan`, `membership`, `member`, `payment`, `attendance`, `lead`, `lead.activity`, `followup`, `appointment`, `automation`, `notification`, `report`, `audit`.
+- `getCurrentUser` (src/lib/auth/auth.ts) queries the rows and stores the computed set on `SessionUser.permissions`.
+- `can(user, p)` / `canAny` / `requirePermission` (src/lib/permissions.ts) use `user.permissions` when present; without one they fall back to the role default so isolated callers/tests keep working.
+- An override row with an unknown permission string is ignored safely.
+- `updateUserPermissions` writes a full matrix with role defaults as the diff baseline, so revoking a default-granted permission correctly writes a `granted:false` row (see `tests/users-access.test.ts`).
 
-Examples:
+## 4. OWNER guarantees
 
-| Permission | Scope-guarded data |
-|------------|--------------------|
-| `organization:settings:read/update` | Organization record |
-| `user:list`, `user:create`, `user:update`, `user:deactivate` | Users |
-| `role:manage` | Roles/UserRole |
-| `member:create/read/update/freeze` | Members |
-| `plan:create/read/update/archive` | Plans |
-| `membership:create/read/update/cancel/freeze` | Memberships |
-| `payment:create/read/refund/void` | Payments |
-| `attendance:read`, `attendance:record` | Check-ins, QR sessions |
-| `lead:create/read/update/assign/convert/reassign` | Leads |
-| `lead.activity:create`, `followup:create/update` | CRM touches |
-| `appointment:create/read/update` | Appointments |
-| `automation:manage` | Rules + jobs |
-| `notification:read/send` | Notifications |
-| `report:read` | Reports |
-| `audit:read` | Audit log |
+- `OWNER` **always** has the full catalog — `OWNER_FULL_ACCESS`.
+- Permission overrides can **never** narrow an owner (`effectivePermissions` ignores overrides for the OWNER role; the permission editor hides editing for owners).
+- **Only an OWNER** may create or promote another user to OWNER (`ownerRoleChangeForbidden`). An ADMIN holding `staff:manage` still cannot.
+- The **last active OWNER** can never be deactivated or demoted (`wouldRemoveLastOwner` guard in create/update/status actions).
+- Nobody can deactivate their **own** account (`isSelf` guard).
+- Deactivation is soft (status `DEACTIVATED`); there is no hard delete of users.
 
-## 4. Enforcement strategy
+## 5. Tenant boundary (organization isolation)
 
-Every server entrypoint (Server Action / route handler) runs a guard:
+- The tenant key is always `user.organizationId` resolved server-side from the session.
+- All staff lookups go through `findStaffInOrg(staffId, organizationId)`; every query in `src/lib/actions/*` filters by `organizationId`.
+- A user from Organization A **cannot** read, list, modify, or audit Organization B staff: out-of-org IDs resolve to "not found"/"not authorized" indistinguishable errors.
+- `username` is unique **per organization** (`User_organizationId_username_key`) and is a display alias only — the **email remains the login identifier**.
 
-1. Resolve User from session; **fail closed** if absent or deactivated.
-2. Resolve Organization (tenant) from session.
-3. Determine effective permissions from roles + scopes.
-4. Check the permission; if absent → 403, no data returned.
-5. Scope-check: if the grant is location-scoped, verify the target entity belongs to an allowed location **and** to the session tenant.
-6. Only after all checks pass, invoke the service.
+## 6. Role/permission change rules
 
-### What "never trust the client" means in practice
-- Client may send `organization_id`, `role`, `member_id`, `payment status`, `attendance identity` — **all are ignored** or validated to match server state.
-- Data lookups are always scoped by the tenant key resolved server-side; an out-of-tenant ID returns 403/404 (indistinguishable to avoid enumeration), never data.
+- Role changes re-derive default permissions; explicit override rows still apply on top of the new role's defaults.
+- Only OWNER may set the OWNER role (create team member or edit existing).
+- Changing ownership/status/username permissions bumps the target's `sessionVersion` (see SECURITY.md §Session revocation).
 
-## 5. Tenant boundary
-
-An authenticated user belongs to exactly one organization. All their permitted data is within that organization. Multi-location is handled by per-location scopes — but always inside the same tenant. There is **no** cross-tenant user or cross-tenant data path.
-
-## 6. Important edge cases
-
-- **Deactivated user** holding an active session: every request re-checks status; immediately unauthorized.
-- **Role changed** mid-session: permissions re-evaluated per request (no stale cached policy beyond the request).
-- **Location reassignment**: a location-scoped role only affects data at the assigned location; reassigning a user's role never leaks another location's data.
-- **Owner must not be deactivated** if they are the sole org owner (guard).
-- **Lead reassignment / ownership** changes are audited and permission-gated (`lead:assign`, `lead:reassign`).
-- **Enumeration defense**: 403 vs 404 indistinguishable for out-of-tenant IDs.
-
-## 7. Enforcement points inventory
+## 7. Enforcement points (implemented)
 
 | Surface | Guard |
 |---------|-------|
-| Server Action | Session → tenant → permission → scope |
-| Route handler (API) | Same as Server Action |
-| RSC page data load | Permission + tenant scope |
-| Server-side background job | Authenticated as service context, restricted to job's tenant scope |
-| Automation action | Runs with the rule owner's effective permissions captured at creation (or service context), never broader |
+| Server Actions (mutations) | `requireUserOrThrow()` + `can(user, "<perm>")` → `{ success:false, error }` |
+| RSC page data loads | `requireUser()` + `if (!can(user, "<view>")) notFound()` |
+| API route (`/api/data/export`) | `requireUserOrThrow()` + `can(user, "settings:manage")` |
+| Query actions (users page) | `requireUserOrThrow()` + `can(user, "staff:manage")` |
+| Sidebar nav | items filtered by `can(user, item.permission)` |
 
-Automation and background jobs execute with a **service identity** scoped to the rule's organization; they cannot act on data outside that organization.
+Permission gates on mutations: `members:create/update/archive`, `plans:manage`, `memberships:manage`, `payments:record`, `attendance:record` (manual + QR), `leads:create/update/manage/convert`, `trainers:manage`, `appointments:manage`, `tasks:manage`, `notifications:update`, `settings:manage`, `staff:manage`. Page view guards: every `/dashboard/*` module page (see `src/app/dashboard`).
+
+## 8. Sensitive grants
+
+`staff:manage` (Users & Access – Manage users) is market as **sensitive** in `PERMISSION_MATRIX`. The permission editor requires an explicit confirmation checkbox before it may be granted, and a newly-granted `staff:manage` immediately takes effect server-side for that user's next request.

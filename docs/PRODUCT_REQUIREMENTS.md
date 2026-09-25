@@ -71,8 +71,11 @@ Roles are granted as **role × scope**: a role binds a set of permissions to an 
 
 - FR-MEM-01 A member must belong to exactly one organization and have a primary location.
 - FR-MEM-02 Member identity (name, contact, photo) is managed within the organization.
-- FR-MEM-03 A member has a stable public key (UUID) but no stable human-facing numeric ID that is exposed in QRs or client URLs.
+- FR-MEM-03 A member has a stable canonical key (UUID, internal-only). The human-facing **Member Code** (`MEM-0001`, org-scoped, assigned by the server and never recycled) is a **display/organizational identifier only**: it is shown to staff across membership, payment, attendance, CRM and export surfaces, and may also be matched by staff search. It is **never** embedded in QR payloads, client URLs, or auth tokens, and it is never used as a foreign key or for authorization — the UUID remains canonical everywhere under the hood.
 - FR-MEM-04 Member status: `active`, `frozen`, `inactive`.
+- FR-MEM-05 A Member Code is unique **per organization** (the DB enforces `(organization_id, member_code)`); codes have no 9999 cap and are never reused after assignment, even when a member is archived.
+- FR-MEM-06 Member phone is **not unique** — even within an organization. Two members may share a phone (family members). Duplicate detection on create/update is a **warning only** (STRONG: same normalized name AND same phone; WEAK: same name), never a hard block. Email remains org-unique.
+- FR-MEM-07 Member search includes the Member Code as a matchable and displayable term alongside name and phone (same-name members are disambiguated by their codes).
 
 ### 5.3 Trainers
 
@@ -103,7 +106,7 @@ Roles are granted as **role × scope**: a role binds a set of permissions to an 
 ### 5.7 QR attendance
 
 - FR-QR-01 Attendance uses an **authenticated member flow** plus a **short-lived gym QR session/token**.
-- FR-QR-02 A static QR must never contain a member ID.
+- FR-QR-02 A static QR must never contain a member ID or a member code.
 - FR-QR-03 A check-in records: member, location, timestamp, and the QR session/token identifier.
 - FR-QR-04 Duplicate check-in within a configurable window is rejected.
 - FR-QR-05 Attendance validates that the member has an active membership.

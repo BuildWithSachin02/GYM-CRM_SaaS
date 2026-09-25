@@ -8,6 +8,10 @@ import { z } from "zod"
 import { toast } from "sonner"
 
 import { manualCheckin } from "@/lib/actions/attendance"
+import {
+  memberSelectionLabel,
+  memberSelectionSublabel,
+} from "@/lib/member-code"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -30,7 +34,13 @@ import {
 } from "@/components/ui/form"
 import { EntityCombobox } from "@/components/ui/entity-combobox"
 
-type Member = { id: string; firstName: string; lastName: string }
+type Member = {
+  id: string
+  firstName: string
+  lastName: string
+  memberCode?: string | null
+  phone?: string | null
+}
 
 const manualCheckinFormSchema = z.object({
   memberId: z.string().uuid("Please select a member"),
@@ -119,7 +129,8 @@ export function ManualCheckinForm({ members, trigger }: ManualCheckinFormProps) 
                       onValueChange={field.onChange}
                       options={members.map((m) => ({
                         id: m.id,
-                        label: `${m.firstName} ${m.lastName}`.trim(),
+                        label: memberSelectionLabel(m),
+                        sublabel: memberSelectionSublabel(m),
                       }))}
                       placeholder="Search or select a member"
                       emptyText="No members found."
