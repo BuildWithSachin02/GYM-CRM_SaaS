@@ -15,6 +15,7 @@ import {
 } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { can } from "@/lib/permissions"
+import { resolveWriteBranch } from "@/lib/branches"
 import {
   isMemberCodeCollision,
   nextMemberCode,
@@ -56,9 +57,15 @@ export async function createLead(input: LeadInput): Promise<LeadActionResult> {
 
   const data = parsed.data
 
+  // Leads are captured at a branch; without a form-selected branch the actor's
+  // own branch is used.
+  const resolved = await resolveWriteBranch()
+  if (!resolved.ok) return { success: false, error: resolved.error }
+
   const lead = await prisma.lead.create({
     data: {
       organizationId: user.organizationId,
+      branchId: resolved.branchId,
       name: data.name,
       phone: data.phone,
       email: data.email || null,
@@ -304,7 +311,7 @@ export async function convertLeadToMember(
 
   const lead = await prisma.lead.findFirst({
     where: { id: data.leadId, organizationId: user.organizationId, deletedAt: null },
-    select: { id: true, name: true, phone: true, email: true, source: true },
+    select: { id: true, name: true, phone: true, email: true, source: true, branchId: true },
   })
 
   if (!lead) {
@@ -314,6 +321,12 @@ export async function convertLeadToMember(
   const nameParts = lead.name.trim().split(/\s+/)
   const firstName = nameParts[0] || lead.name
   const lastName = nameParts.slice(1).join(" ") || ""
+
+  // A converted member joins the branch the lead was worked at; a legacy lead
+  // without a branch falls back to the actor's own branch.
+  const resolved = await resolveWriteBranch()
+  if (!resolved.ok) return { success: false, error: resolved.error }
+  const conversionBranchId = lead.branchId ?? resolved.branchId
 
   const endDate = new Date(data.startDate)
   endDate.setDate(endDate.getDate() + data.durationDays)
@@ -336,6 +349,7 @@ export async function convertLeadToMember(
             phone: lead.phone,
             email: lead.email,
             signupSource: lead.source,
+            homeBranchId: conversionBranchId,
             status: "ACTIVE",
           },
           select: { id: true, memberCode: true },
@@ -346,6 +360,7 @@ export async function convertLeadToMember(
             organizationId: user.organizationId,
             memberId: member.id,
             planId: data.planId,
+            branchId: conversionBranchId,
             startDate: data.startDate,
             endDate,
             amountMinor: data.amountMinor,

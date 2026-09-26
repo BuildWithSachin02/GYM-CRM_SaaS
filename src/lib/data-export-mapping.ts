@@ -141,7 +141,7 @@ export type ExportRowMap = {
     createdAt: Date
     updatedAt: Date
     trainer: { user: { name: string } } | null
-    location: { name: string } | null
+    homeBranch: { name: string } | null
   }
   memberships: {
     id: string
@@ -211,7 +211,7 @@ export type ExportRowMap = {
     checkedInAt: Date
     source: string
     member: { firstName: string; lastName: string; memberCode?: string | null }
-    location: { name: string } | null
+    branch: { name: string } | null
     qrSession: { id: string; label: string | null } | null
   }
   leads: {
@@ -229,7 +229,7 @@ export type ExportRowMap = {
     deletedAt: Date | null
     createdAt: Date
     updatedAt: Date
-    location: { name: string } | null
+    branch: { name: string } | null
     interestedPlan: { name: string } | null
     ownerUser: { name: string } | null
     convertedMember: { firstName: string; lastName: string } | null
@@ -246,7 +246,7 @@ export type ExportRowMap = {
     lead: { id: string; name: string } | null
     trainer: { user: { name: string } } | null
     staff: { name: string } | null
-    location: { name: string } | null
+    branch: { name: string } | null
   }
   tasks: {
     id: string
@@ -267,7 +267,7 @@ export type ExportRowMap = {
     expiresAt: Date
     revokedAt: Date | null
     createdAt: Date
-    location: { name: string }
+    branch: { name: string }
     createdBy: { name: string }
   }
   leadActivities: {
@@ -316,7 +316,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Emergency Contact Name", kind: "text" },
     { header: "Emergency Contact Phone", kind: "text" },
     { header: "Trainer", kind: "text" },
-    { header: "Primary Location", kind: "text" },
+    { header: "Primary Branch", kind: "text" },
     { header: "Signup Source", kind: "text" },
     { header: "Status", kind: "text" },
     { header: "Notes", kind: "text" },
@@ -386,7 +386,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Member Code", kind: "text" },
     { header: "Date", kind: "date" },
     { header: "Checked In At", kind: "datetime" },
-    { header: "Location", kind: "text" },
+    { header: "Branch", kind: "text" },
     { header: "Source", kind: "text" },
     { header: "QR Session", kind: "text" },
     { header: "QR Session ID", kind: "text" },
@@ -405,7 +405,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Converted At", kind: "datetime" },
     { header: "Converted Member ID", kind: "text" },
     { header: "Converted Member", kind: "text" },
-    { header: "Location", kind: "text" },
+    { header: "Branch", kind: "text" },
     { header: "Notes", kind: "text" },
     { header: "Deleted At", kind: "datetime" },
     { header: "Created At", kind: "datetime" },
@@ -423,7 +423,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
     { header: "Starts At", kind: "datetime" },
     { header: "Ends At", kind: "datetime" },
     { header: "Status", kind: "text" },
-    { header: "Location", kind: "text" },
+    { header: "Branch", kind: "text" },
     { header: "Notes", kind: "text" },
     { header: "Created At", kind: "datetime" },
     { header: "Updated At", kind: "datetime" },
@@ -447,7 +447,7 @@ export const EXPORT_COLUMNS: Record<DataCategoryKey, ExportColumn[]> = {
   qrSessions: [
     { header: "QR Session ID", kind: "text" },
     { header: "Label", kind: "text" },
-    { header: "Location", kind: "text" },
+    { header: "Branch", kind: "text" },
     { header: "Expires At", kind: "datetime" },
     { header: "Revoked At", kind: "datetime" },
     { header: "Created By", kind: "text" },
@@ -519,7 +519,7 @@ function mapMembersRow(row: ExportRowMap["members"], timeZone: string): ExcelCel
     empty(row.emergencyContactName),
     empty(row.emergencyContactPhone),
     empty(row.trainer?.user.name),
-    empty(row.location?.name),
+    empty(row.homeBranch?.name),
     row.signupSource ?? "",
     row.status,
     empty(row.notes),
@@ -605,7 +605,7 @@ function mapAttendanceRow(row: ExportRowMap["attendance"], timeZone: string): Ex
     empty(row.member.memberCode),
     dateCellFromKey(row.dayKey),
     dateTimeCellInZone(row.checkedInAt, timeZone),
-    empty(row.location?.name),
+    empty(row.branch?.name),
     row.source,
     empty(row.qrSession?.label),
     empty(row.qrSession?.id),
@@ -627,7 +627,7 @@ function mapLeadsRow(row: ExportRowMap["leads"], timeZone: string): ExcelCell[] 
     dateTimeCellInZone(row.convertedAt, timeZone),
     empty(row.convertedMemberId),
     row.convertedMember ? fullNameRow(row.convertedMember) : "",
-    empty(row.location?.name),
+    empty(row.branch?.name),
     empty(row.notes),
     dateTimeCellInZone(row.deletedAt, timeZone),
     dateTimeCellInZone(row.createdAt, timeZone),
@@ -648,7 +648,7 @@ function mapAppointmentsRow(row: ExportRowMap["appointments"], timeZone: string)
     dateTimeCellInZone(row.startsAt, timeZone),
     dateTimeCellInZone(row.endsAt, timeZone),
     row.status,
-    empty(row.location?.name),
+    empty(row.branch?.name),
     empty(row.notes),
     dateTimeCellInZone(row.createdAt, timeZone),
     dateTimeCellInZone(row.updatedAt, timeZone),
@@ -678,7 +678,7 @@ function mapQrSessionsRow(row: ExportRowMap["qrSessions"], timeZone: string): Ex
   return [
     empty(row.id),
     empty(row.label),
-    empty(row.location.name),
+    empty(row.branch.name),
     dateTimeCellInZone(row.expiresAt, timeZone),
     dateTimeCellInZone(row.revokedAt, timeZone),
     empty(row.createdBy.name),

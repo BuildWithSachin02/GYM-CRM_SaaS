@@ -51,7 +51,7 @@ type Checkin = {
   dayKey: string
   source: "MANUAL" | "QR_SESSION"
   checkedInAt: string
-  locationName: string | null
+  branchName: string | null
 }
 
 type Preset = { id: string; label: string }
@@ -332,7 +332,7 @@ export function MemberAttendancePage({
                       </StatusBadge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {c.locationName ?? "—"}
+                      {c.branchName ?? "—"}
                     </TableCell>
                     {canCorrect && (
                       <TableCell className="text-right">

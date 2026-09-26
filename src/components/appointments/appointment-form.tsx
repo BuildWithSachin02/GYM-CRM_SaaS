@@ -126,7 +126,7 @@ export function AppointmentForm({
         endsAt: data.endsAt,
         status: "SCHEDULED",
         notes: data.notes || null,
-        locationId: null,
+        branchId: null,
       })
       if (res.success) {
         toast.success("Appointment created")

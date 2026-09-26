@@ -14,6 +14,7 @@ import {
   type MembershipRenewInput,
 } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { resolveWriteBranch } from "@/lib/branches"
 import {
   canRenewLifecycle,
   dayKeyInTimeZone,
@@ -59,6 +60,9 @@ export async function createMembership(
   }
 
   const data = parsed.data
+
+  const resolved = await resolveWriteBranch()
+  if (!resolved.ok) return { success: false, error: resolved.error }
 
   const [member, plan] = await Promise.all([
     prisma.member.findFirst({
@@ -127,6 +131,7 @@ export async function createMembership(
           organizationId: user.organizationId,
           memberId: data.memberId,
           planId: data.planId,
+          branchId: resolved.branchId,
           startDate: start,
           endDate: end,
           amountMinor: data.amountMinor,
@@ -188,6 +193,7 @@ export async function renewMembership(
       status: true,
       startDate: true,
       endDate: true,
+      branchId: true,
     },
   })
 
@@ -323,6 +329,8 @@ export async function renewMembership(
           organizationId: user.organizationId,
           memberId: existing.memberId,
           planId: data.planId,
+          // A renewal continues in the branch where it was sold.
+          branchId: existing.branchId,
           startDate: start,
           endDate: end,
           amountMinor: data.amountMinor,

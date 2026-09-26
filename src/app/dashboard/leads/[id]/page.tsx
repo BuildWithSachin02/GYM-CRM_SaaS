@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilter, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 
 import { LeadProfile } from "@/components/leads/lead-profile"
 
@@ -15,8 +17,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { id } = await params
   const user = await requireUser()
 
+  // Same branch clause as the page body, so a lead the viewer may not see never
+  // leaks its name through the document title.
+  const branchClause = branchFilterWhere(await getBranchFilter())
+
   const lead = await prisma.lead.findFirst({
-    where: { id, organizationId: user.organizationId, deletedAt: null },
+    where: { id, organizationId: user.organizationId, deletedAt: null, ...branchClause },
     select: { name: true },
   })
 
@@ -29,9 +35,11 @@ export default async function LeadDetailPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
   if (!can(user, "leads:view")) notFound()
+  await requireBranchAccess()
+  const branchClause = branchFilterWhere(await getBranchFilter())
 
   const lead = await prisma.lead.findFirst({
-    where: { id, organizationId: user.organizationId, deletedAt: null },
+    where: { id, organizationId: user.organizationId, deletedAt: null, ...branchClause },
     select: {
       id: true,
       name: true,

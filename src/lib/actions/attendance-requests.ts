@@ -30,7 +30,7 @@ async function findDecisionRequest(requestId: string) {
       status: true,
       dayKey: true,
       requestedAt: true,
-      qrSession: { select: { locationId: true } },
+      branchId: true,
       member: {
         select: { id: true, firstName: true, lastName: true, status: true, deletedAt: true },
       },
@@ -109,7 +109,7 @@ export async function approveAttendanceRequest(
         data: {
           organizationId: user.organizationId,
           memberId: request.member.id,
-          locationId: request.qrSession?.locationId ?? null,
+          branchId: request.branchId,
           source: "QR_SESSION",
           dayKey: request.dayKey,
           checkedInAt: request.requestedAt,

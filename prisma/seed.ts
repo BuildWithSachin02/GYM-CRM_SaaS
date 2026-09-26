@@ -12,6 +12,8 @@ import { PrismaClient } from "@prisma/client"
 import bcrypt from "bcryptjs"
 import { createHash, randomBytes } from "node:crypto"
 
+import { nextBranchCode } from "../src/lib/branch-code"
+
 const prisma = new PrismaClient()
 
 const DAY = 24 * 60 * 60 * 1000
@@ -143,13 +145,18 @@ async function main() {
   const org = await findOrCreateOrg()
   console.log(`Organization: ${org.name} (${org.id})`)
 
-  // ── Location ────────────────────────────────────────────────────
-  const location = await prisma.gymLocation.upsert({
+  // ── Branch ─────────────────────────────────────────────────────
+  const existingBranchCodes = await prisma.branch.findMany({
+    where: { organizationId: org.id },
+    select: { branchCode: true },
+  })
+  const branch = await prisma.branch.upsert({
     where: { organizationId_name: { organizationId: org.id, name: "King's Gym — Main" } },
     update: {},
     create: {
       organizationId: org.id,
       name: "King's Gym — Main",
+      branchCode: nextBranchCode(existingBranchCodes.map((r) => r.branchCode)),
       address: "2nd Floor, City Mart Complex, MG Road",
       city: "Pune",
       state: "Maharashtra",
@@ -210,7 +217,52 @@ async function main() {
     ["Functional Training", "Yoga"]
   )
 
-  // ── Delete all business data (preserve org + users + trainers + locations) ──
+  // ── Branch access ──────────────────────────────────────────────
+  // OWNER holds org-wide access by role (no UserBranch rows). Every other
+  // ACTIVE staff member is assigned to the main branch (primary) so the seed
+  // data is visible — without a row, a restricted user is fail-closed.
+  await prisma.userBranch.upsert({
+    where: {
+      organizationId_userId_branchId: {
+        organizationId: org.id, userId: admin.id, branchId: branch.id,
+      },
+    },
+    update: { isPrimary: true },
+    create: { organizationId: org.id, userId: admin.id, branchId: branch.id, isPrimary: true },
+  })
+  await prisma.userBranch.upsert({
+    where: {
+      organizationId_userId_branchId: {
+        organizationId: org.id, userId: reception.id, branchId: branch.id,
+      },
+    },
+    update: { isPrimary: true },
+    create: { organizationId: org.id, userId: reception.id, branchId: branch.id, isPrimary: true },
+  })
+  await prisma.userBranch.upsert({
+    where: {
+      organizationId_userId_branchId: {
+        organizationId: org.id, userId: trainerUser1.id, branchId: branch.id,
+      },
+    },
+    update: { isPrimary: true },
+    create: {
+      organizationId: org.id, userId: trainerUser1.id, branchId: branch.id, isPrimary: true,
+    },
+  })
+  await prisma.userBranch.upsert({
+    where: {
+      organizationId_userId_branchId: {
+        organizationId: org.id, userId: trainerUser2.id, branchId: branch.id,
+      },
+    },
+    update: { isPrimary: true },
+    create: {
+      organizationId: org.id, userId: trainerUser2.id, branchId: branch.id, isPrimary: true,
+    },
+  })
+
+  // ── Delete all business data (preserve org + users + trainers + branches) ──
   console.log("Clearing existing business data...")
   await prisma.$transaction([
     prisma.auditLog.deleteMany({ where: { organizationId: org.id } }),
@@ -232,7 +284,7 @@ async function main() {
     data: {
       organizationId: org.id, name: "Monthly", billingInterval: "MONTHLY",
       priceMinor: inr(1299), durationDays: 30,
-      description: "1 month full gym access (all locations).", active: true,
+      description: "1 month full gym access (all branches).", active: true,
     },
   })
   const quarterly = await prisma.membershipPlan.create({
@@ -322,7 +374,7 @@ async function main() {
     const member = await prisma.member.create({
       data: {
         organizationId: org.id,
-        primaryLocationId: location.id,
+        homeBranchId: branch.id,
         memberCode: `MEM-${String(memberCodeSeq).padStart(4, "0")}`,
         firstName: s.first,
         lastName: s.last,
@@ -358,6 +410,7 @@ async function main() {
           organizationId: org.id,
           memberId: member.id,
           planId: period.plan.id,
+          branchId: branch.id,
           status: endDate.getTime() < now.getTime() ? "EXPIRED" : "ACTIVE",
           startDate,
           endDate,
@@ -370,6 +423,7 @@ async function main() {
           organizationId: org.id,
           memberId: member.id,
           membershipId: membership.id,
+          branchId: branch.id,
           amountMinor: period.plan.priceMinor,
           method: PAYMENT_METHODS[i % PAYMENT_METHODS.length],
           reference: `TXN9001${String(100001 + paymentCounter + i * 100)}`,
@@ -399,7 +453,7 @@ async function main() {
         data: {
           organizationId: org.id,
           memberId: members[i].id,
-          locationId: location.id,
+          branchId: branch.id,
           source: "MANUAL",
           dayKey: todayKeyVal,
           checkedInAt: new Date(now.getTime() - i * 37 * 60 * 1000),
@@ -415,7 +469,7 @@ async function main() {
           data: {
             organizationId: org.id,
             memberId: members[i].id,
-            locationId: location.id,
+            branchId: branch.id,
             source: "MANUAL",
             dayKey: dayKey(day),
             checkedInAt: day,
@@ -467,7 +521,7 @@ async function main() {
     const lead = await prisma.lead.create({
       data: {
         organizationId: org.id,
-        locationId: location.id,
+        branchId: branch.id,
         name: s.name,
         phone: s.phone,
         email: s.email ?? null,
@@ -506,31 +560,31 @@ async function main() {
   await prisma.appointment.createMany({
     data: [
       {
-        organizationId: org.id, locationId: location.id,
+        organizationId: org.id, branchId: branch.id,
         memberId: members[0].id, trainerId: trainer1.id, staffId: trainerUser1.id,
         startsAt: hoursFromNow(1), endsAt: hoursFromNow(2),
         status: "SCHEDULED", notes: "Strength assessment",
       },
       {
-        organizationId: org.id, locationId: location.id,
+        organizationId: org.id, branchId: branch.id,
         memberId: members[5].id, trainerId: trainer2.id, staffId: trainerUser2.id,
         startsAt: hoursFromNow(4), endsAt: hoursFromNow(5),
         status: "SCHEDULED", notes: "Functional training session",
       },
       {
-        organizationId: org.id, locationId: location.id,
+        organizationId: org.id, branchId: branch.id,
         memberId: members[7].id, trainerId: trainer2.id, staffId: trainerUser2.id,
         startsAt: hoursFromNow(28), endsAt: hoursFromNow(29),
         status: "SCHEDULED", notes: "Yoga alignment review",
       },
       {
-        organizationId: org.id, locationId: location.id,
+        organizationId: org.id, branchId: branch.id,
         leadId: leadIds[2], trainerId: trainer1.id, staffId: trainerUser1.id,
         startsAt: hoursFromNow(3), endsAt: hoursFromNow(3.5),
         status: "SCHEDULED", notes: "Gym tour + plan discussion",
       },
       {
-        organizationId: org.id, locationId: location.id,
+        organizationId: org.id, branchId: branch.id,
         leadId: leadIds[3], staffId: admin.id,
         startsAt: hoursFromNow(-2), endsAt: hoursFromNow(-1),
         status: "COMPLETED", notes: "Intro visit completed",
@@ -585,7 +639,7 @@ async function main() {
   const demoQrHash = createHash("sha256").update(demoQrToken).digest("hex")
   await prisma.qRSession.create({
     data: {
-      organizationId: org.id, locationId: location.id,
+      organizationId: org.id, branchId: branch.id,
       label: "Front desk — active demo session",
       tokenHash: demoQrHash,
       expiresAt: hoursFromNow(8),

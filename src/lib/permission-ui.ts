@@ -41,6 +41,8 @@ export const ACTION_DESCRIPTIONS: Record<string, string> = {
   Assign: "Can assign records to staff.",
   "Mark read": "Can mark notifications as read.",
   "Manage users": "Can create and edit staff accounts and change other people's access.",
+  Activate: "Can deactivate and reactivate a location, which pauses new work there without deleting its history.",
+  "Manage staff": "Can grant and revoke which staff members have access to a location.",
 }
 
 /**
@@ -62,6 +64,11 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "payments:record": "Can record payments, refunds and voids.",
   "attendance:view": "Can view attendance lists and check-in history.",
   "attendance:record": "Can perform member check-ins.",
+  "branches:view": "Can view branches and their quick overview.",
+  "branches:create": "Can add a new branch.",
+  "branches:edit": "Can edit a branch's name and contact details.",
+  "branches:deactivate": "Can deactivate or reactivate a branch.",
+  "branches:manage": "Can decide which staff can operate in each branch.",
   "leads:view": "Can view leads and their pipeline.",
   "leads:create": "Can add new leads.",
   "leads:update": "Can edit lead details.",

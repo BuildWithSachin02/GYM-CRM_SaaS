@@ -20,7 +20,10 @@ enum OrgStatus {
   SUSPENDED
 }
 
-enum LocationStatus {
+// Branch lifecycle. A branch is soft-deactivated only (never hard-deleted) so
+// its historical members, memberships, payments, attendance, QR sessions,
+// leads, appointments and tasks survive forever.
+enum BranchStatus {
   ACTIVE
   INACTIVE
 }
@@ -161,50 +164,135 @@ model Organization {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  locations      GymLocation[]
-  users          User[]
-  members        Member[]
-  trainers       Trainer[]
-  plans          MembershipPlan[]
-  memberships    Membership[]
-  payments       Payment[]
-  checkIns       CheckIn[]
-  qrSessions     QRSession[]
-  leads          Lead[]
-  leadActivities LeadActivity[]
-  appointments   Appointment[]
+  branches           Branch[]
+  users              User[]
+  members            Member[]
+  trainers           Trainer[]
+  plans              MembershipPlan[]
+  memberships        Membership[]
+  payments           Payment[]
+  checkIns           CheckIn[]
+  qrSessions         QRSession[]
+  leads              Lead[]
+  leadActivities     LeadActivity[]
+  appointments       Appointment[]
   tasks              Task[]
   notifications      Notification[]
   auditLogs          AuditLog[]
   attendanceRequests AttendanceRequest[]
   memberDevices      MemberDevice[]
   userPermissions    UserPermission[]
+  userBranches       UserBranch[]
 
   @@index([status])
 }
 
-model GymLocation {
-  id             String         @id @default(uuid())
+// ---------------------------------------------------------------------------
+// Branches (child scope inside an Organization)
+//
+// A Branch answers "WHERE does this operation happen?". It is NEVER a tenant
+// boundary on its own: every query that touches a branch MUST also filter
+// organizationId. Organization remains the primary tenant; Branch is a child
+// scope used for operational filtering, reporting and staff access.
+//
+// Identity:
+//   id         — canonical UUID. Every FK uses it. Never shown as an identity.
+//   branchCode — org-unique human-facing display/search code ("BR-0001"),
+//               generated server-side and never reused, mirroring the Member
+//               Code philosophy. NEVER a foreign key, NEVER authorization.
+//   name       — org-unique human label (existing GymLocation behaviour).
+//
+// Timezone: deliberately ABSENT. Every day-key and money computation in this
+// CRM runs on the ORGANIZATION timezone (see dayKeyInTimeZone, the
+// @@unique([organizationId, memberId, dayKey]) attendance rule and revenue
+// bucketing). A per-branch timezone column would be a trap: it could never be
+// honoured without changing those unique keys, so a Branch simply INHERITS
+// Organization.timezone. The getter below is the single place that resolves it.
+//
+// Deletion: NEVER hard-deleted. Status flips to INACTIVE only. All relations
+// are Restrict/SetNull so no historical financial or attendance row can ever be
+// destroyed by removing a branch.
+// ---------------------------------------------------------------------------
+
+model Branch {
+  id             String       @id @default(uuid())
   organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branchCode     String
   name           String
+  phone          String?
+  email          String?
   address        String?
   city           String?
   state          String?
-  timezone       String         @default("Asia/Kolkata")
-  status         LocationStatus @default(ACTIVE)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  country        String?
+  status         BranchStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  members      Member[]      @relation("MemberLocations")
-  checkIns     CheckIn[]
-  qrSessions   QRSession[]
-  appointments Appointment[]
-  leads        Lead[]
+  // Members whose HOME branch is this one. A member is organization-owned and
+  // is never trapped: memberships and operational records carry their own
+  // branch, so a future "member visits several branches" model can be added
+  // without restructuring Member.
+  homeMembers        Member[]            @relation("MemberHomeBranch")
+  memberships        Membership[]
+  payments           Payment[]
+  checkIns           CheckIn[]
+  qrSessions         QRSession[]
+  attendanceRequests AttendanceRequest[]
+  leads              Lead[]
+  appointments       Appointment[]
+  tasks              Task[]
+  userAccess         UserBranch[]
 
+  @@unique([organizationId, branchCode])
   @@unique([organizationId, name])
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([organizationId, status, name])
+}
+
+// ---------------------------------------------------------------------------
+// Per-user BRANCH access (scope, not permission)
+//
+// This is deliberately separate from UserPermission:
+//
+//   Permission  answers "WHAT can this user do?"    (capability-based)
+//   UserBranch  answers "WHERE can this user do it?" (scope-based)
+//
+// Branch access never invents branch-specific permission keys such as
+// "branch1_members:create" — that would couple the branch domain to the
+// permission catalog. Roles (OWNER/ADMIN/RECEPTIONIST/TRAINER) are unchanged
+// and organization-wide; only WHERE a user may operate is scoped here.
+//
+// OWNER holds organization-wide branch access by ROLE and therefore needs no
+// rows. Every other role is restricted to its assigned ACTIVE branches; a user
+// with zero assignments sees no branch data (fail-closed).
+//
+// onDelete: a UserBranch row disappears with its user (Cascade) or with its
+// branch (Cascade — safe because branches are soft-deleted, so this only ever
+// fires in tests/cleanup and never destroys business data).
+// ---------------------------------------------------------------------------
+
+model UserBranch {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branchId       String
+  branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  // At most one primary branch per user, enforced in the app layer (a partial
+  // unique index cannot express "exactly one of many"). Used as the
+  // deterministic fallback when no branch has been explicitly selected.
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, userId, branchId])
+  @@index([organizationId])
+  @@index([organizationId, userId])
+  @@index([organizationId, branchId])
 }
 
 // ---------------------------------------------------------------------------
@@ -233,19 +321,20 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  trainer           Trainer?
-  recordedPayments  Payment[]      @relation("RecordedPayments")
-  createdQrSessions QRSession[]    @relation("CreatedQrSessions")
-  ownedLeads        Lead[]         @relation("OwnedLeads")
-  staffAppointments Appointment[]  @relation("StaffAppointments")
-  assignedTasks     Task[]         @relation("TaskAssignee")
-  createdTasks              Task[]               @relation("TaskCreator")
-  leadActivities            LeadActivity[]
-  notifications             Notification[]
-  auditLogs                 AuditLog[]
-  approvedAttendanceRequests AttendanceRequest[]  @relation("ApprovedAttendanceRequests")
-  rejectedAttendanceRequests AttendanceRequest[]  @relation("RejectedAttendanceRequests")
-  userPermissions           UserPermission[]
+  trainer                    Trainer?
+  recordedPayments           Payment[]           @relation("RecordedPayments")
+  createdQrSessions          QRSession[]         @relation("CreatedQrSessions")
+  ownedLeads                 Lead[]              @relation("OwnedLeads")
+  staffAppointments          Appointment[]       @relation("StaffAppointments")
+  assignedTasks              Task[]              @relation("TaskAssignee")
+  createdTasks               Task[]              @relation("TaskCreator")
+  leadActivities             LeadActivity[]
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+  approvedAttendanceRequests AttendanceRequest[] @relation("ApprovedAttendanceRequests")
+  rejectedAttendanceRequests AttendanceRequest[] @relation("RejectedAttendanceRequests")
+  userPermissions            UserPermission[]
+  userBranches               UserBranch[]
 
   @@unique([organizationId, username])
   @@index([organizationId])
@@ -279,6 +368,11 @@ model UserPermission {
   @@index([organizationId, userId])
 }
 
+// A Trainer is an ORGANIZATION-LEVEL staff profile that happens to be 1:1 with
+// a User. It carries NO branchId on purpose: a trainer works at whichever
+// branch(es) their linked User has access to, which is already modelled by
+// UserBranch. Adding branchId here would duplicate the access model and force
+// trainers to be duplicated per branch — Trainers are never duplicated.
 model Trainer {
   id             String       @id @default(uuid())
   organizationId String
@@ -306,8 +400,12 @@ model Member {
   id                    String       @id @default(uuid())
   organizationId        String
   organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  primaryLocationId     String?
-  location              GymLocation? @relation("MemberLocations", fields: [primaryLocationId], references: [id], onDelete: SetNull)
+  // The member's HOME branch. Deliberately "home" and not "the" branch: the
+  // member stays organization-owned, and their memberships/payments/attendance
+  // each carry their own branch, so a member can visit (and pay at) another
+  // branch without ever being re-parented. NULL = no home branch assigned yet.
+  homeBranchId          String?
+  homeBranch            Branch?      @relation("MemberHomeBranch", fields: [homeBranchId], references: [id], onDelete: SetNull)
   firstName             String
   lastName              String
   // Org-scoped, human-facing identifier ("MEM-0001"). Display only — the
@@ -334,14 +432,14 @@ model Member {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  memberships    Membership[]
-  payments       Payment[]
-  checkIns       CheckIn[]
-  convertedLeads Lead[]
-  tasks          Task[]        @relation("TaskMember")
-  appointments   Appointment[]
+  memberships        Membership[]
+  payments           Payment[]
+  checkIns           CheckIn[]
+  convertedLeads     Lead[]
+  tasks              Task[]              @relation("TaskMember")
+  appointments       Appointment[]
   attendanceRequests AttendanceRequest[]
-  memberDevices  MemberDevice[]
+  memberDevices      MemberDevice[]
 
   @@unique([organizationId, email])
   // Phone is deliberately NOT org-unique: family members may share a number.
@@ -351,7 +449,7 @@ model Member {
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, trainerId])
-  @@index([organizationId, primaryLocationId])
+  @@index([organizationId, homeBranchId])
   // Covers: member list (org + deletedAt + createdAt desc), totalMembers
   // count (org + deletedAt), recentMembers (org + deletedAt + createdAt desc)
   @@index([organizationId, deletedAt, createdAt])
@@ -391,6 +489,13 @@ model Membership {
   member              Member           @relation(fields: [memberId], references: [id], onDelete: Restrict)
   planId              String
   plan                MembershipPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  // The branch this membership period is sold at. Plans stay ORGANIZATION-level
+  // (never duplicated per branch), so a branch membership simply references an
+  // org-level plan. NOT NULL + Restrict: a membership is a financial record and
+  // must always resolve to a branch; branches are never hard-deleted, so Restrict
+  // can only ever fire on a genuinely broken reference.
+  branchId            String
+  branch              Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
   status              MembershipStatus @default(ACTIVE)
   startDate           DateTime
   endDate             DateTime
@@ -411,6 +516,10 @@ model Membership {
   @@index([organizationId, memberId])
   @@index([organizationId, planId])
   @@index([organizationId, endDate])
+  // Branch-scoped money/renewal views: (org + branch + status + endDate) drives
+  // a branch's expiring/renewal list and its active-membership totals.
+  @@index([organizationId, branchId, status])
+  @@index([organizationId, branchId, status, endDate])
   // Covers: expiring memberships (org + status + endDate range),
   // sidebar membership count (org + status), lifecycle stats (org)
   @@index([organizationId, status, endDate])
@@ -432,6 +541,13 @@ model Payment {
   member         Member        @relation(fields: [memberId], references: [id], onDelete: Restrict)
   membershipId   String?
   membership     Membership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  // Where the money was actually taken, captured at write time from the linked
+  // membership. DENORMALIZED ON PURPOSE: a payment is a financial fact that must
+  // survive its membership being deleted (membershipId is SetNull above) and
+  // must never silently move if a membership is ever edited. NOT NULL + Restrict
+  // for the same reason as Membership.branchId.
+  branchId       String
+  branch         Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
   amountMinor    Int
   currency       String        @default("INR")
   method         PaymentMethod
@@ -449,6 +565,9 @@ model Payment {
   @@index([organizationId, membershipId])
   @@index([organizationId, paymentDate])
   @@index([organizationId, method])
+  // Branch revenue: today's revenue, the 30-day trend and a branch's own
+  // collected total all read (org + branch + status + paymentDate).
+  @@index([organizationId, branchId, paymentDate])
   // Covers: today's revenue (org + status + paymentDate range),
   // revenue trend 30d (org + status + paymentDate gte),
   // recent payments (org + status + paymentDate desc)
@@ -465,8 +584,11 @@ model CheckIn {
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   memberId       String
   member         Member           @relation(fields: [memberId], references: [id], onDelete: Restrict)
-  locationId     String?
-  location       GymLocation?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  // Every check-in happened at a real branch. NOT NULL + Restrict: attendance is
+  // a historical fact and must never lose its location. For QR check-ins this
+  // is derived SERVER-SIDE from the QRSession — a client can never choose it.
+  branchId       String
+  branch         Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
   qrSessionId    String?
   qrSession      QRSession?       @relation(fields: [qrSessionId], references: [id], onDelete: Restrict)
   source         AttendanceSource @default(MANUAL)
@@ -479,7 +601,9 @@ model CheckIn {
   @@unique([organizationId, memberId, dayKey])
   @@index([organizationId])
   @@index([organizationId, memberId])
-  @@index([organizationId, locationId, checkedInAt])
+  // Branch attendance list/trend: (org + branch + dayKey) for a branch's day
+  // view and its dayKey range scans.
+  @@index([organizationId, branchId, dayKey])
   // Covers: today's attendance count (org + dayKey), attendance page list
   // (org + dayKey ordered by checkedInAt desc), attendance trend groupBy
   @@index([organizationId, dayKey])
@@ -489,8 +613,11 @@ model QRSession {
   id             String       @id @default(uuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  locationId     String
-  location       GymLocation  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  // The branch this QR is valid at. A check-in produced by this session can
+  // NEVER land on another branch: the branch is read from the server-resolved
+  // session, never from client input, and an INACTIVE branch rejects scans.
+  branchId       String
+  branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
   label          String?
   tokenHash      String       @unique // only the hash is ever stored
   expiresAt      DateTime
@@ -499,11 +626,13 @@ model QRSession {
   createdBy      User         @relation("CreatedQrSessions", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt      DateTime     @default(now())
 
-  checkIns CheckIn[]
+  checkIns           CheckIn[]
   attendanceRequests AttendanceRequest[]
 
   @@index([organizationId])
   @@index([organizationId, expiresAt])
+  // Branch QR boards: a branch's live sessions, ordered by creation.
+  @@index([organizationId, branchId, expiresAt])
   @@index([expiresAt])
 }
 
@@ -512,18 +641,18 @@ model QRSession {
 // ---------------------------------------------------------------------------
 
 model MemberDevice {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   memberId       String
-  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  member         Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
   // SHA-256 hex digest of the raw cookie token. The raw token lives only in the
   // browser's secure HttpOnly cookie (path=/attendance/qr); the server never
   // stores it, never logs it, and never exports it.
-  tokenHash      String   @unique
-  lastUsedAt     DateTime @default(now()) @updatedAt
+  tokenHash      String       @unique
+  lastUsedAt     DateTime     @default(now()) @updatedAt
   revokedAt      DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
   @@index([organizationId, memberId])
@@ -552,6 +681,12 @@ model AttendanceRequest {
   member          Member                  @relation(fields: [memberId], references: [id], onDelete: Cascade)
   qrSessionId     String?
   qrSession       QRSession?              @relation(fields: [qrSessionId], references: [id], onDelete: SetNull)
+  // The branch the member actually scanned at — derived from the QR session
+  // server-side, or the reviewing branch for a non-QR request. NOT NULL +
+  // Restrict: an approved request is converted into a real CheckIn, so the
+  // request must always know which branch that check-in belongs to.
+  branchId        String
+  branch          Branch                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
   source          AttendanceSource        @default(QR_SESSION)
   status          AttendanceRequestStatus @default(PENDING)
   dayKey          String // YYYY-MM-DD of the attempt, in the org's timezone
@@ -575,6 +710,7 @@ model AttendanceRequest {
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, memberId])
+  @@index([organizationId, branchId, status])
   @@index([organizationId, requestedAt])
 }
 
@@ -586,8 +722,11 @@ model Lead {
   id                String          @id @default(uuid())
   organizationId    String
   organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  locationId        String?
-  location          GymLocation?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  // The branch this lead is being worked at. NULL means an ORGANIZATION-WIDE
+  // lead (a website/phone enquiry not tied to a site) — those stay visible in
+  // every branch view, which is why this column is nullable + SetNull.
+  branchId          String?
+  branch            Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
   name              String
   phone             String
   email             String?
@@ -618,6 +757,9 @@ model Lead {
   @@index([organizationId, source])
   @@index([organizationId, ownerUserId])
   @@index([organizationId, followUpDate])
+  // Branch pipeline + follow-up queue reads.
+  @@index([organizationId, branchId, stage])
+  @@index([organizationId, branchId, stage, followUpDate])
   // Covers: new-lead count (org + deletedAt + stage), pending follow-ups
   // (org + deletedAt + stage + followUpDate range), lead pipeline groupBy
   // (org + deletedAt), today's follow-up list (org + deletedAt + stage +
@@ -650,8 +792,10 @@ model Appointment {
   id             String            @id @default(uuid())
   organizationId String
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  locationId     String?
-  location       GymLocation?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  // NULL = an ORGANIZATION-WIDE appointment (phone/video consult), visible in
+  // every branch view. Always populated for in-person bookings.
+  branchId       String?
+  branch         Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   memberId       String?
   member         Member?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
   leadId         String?
@@ -673,6 +817,8 @@ model Appointment {
   @@index([organizationId, memberId])
   @@index([organizationId, leadId])
   @@index([organizationId, trainerId])
+  // Branch schedule: today's board and status counts per branch.
+  @@index([organizationId, branchId, startsAt])
   // Covers: today's appointments (org + startsAt range), next-week
   // appointments (org + status + startsAt range), upcoming appointments
   // count (org + status + startsAt gte), appointments page (org + startsAt)
@@ -697,6 +843,11 @@ model Task {
   createdBy      User?        @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
   memberId       String?
   member         Member?      @relation("TaskMember", fields: [memberId], references: [id], onDelete: SetNull)
+  // NULL = an ORGANIZATION-WIDE task (e.g. "reply to the accountant"), visible
+  // in every branch view. Follow-ups about a specific member/lead inherit that
+  // record's branch.
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
   leadId         String?
   lead           Lead?        @relation("TaskLead", fields: [leadId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
@@ -706,6 +857,8 @@ model Task {
   @@index([organizationId, status])
   @@index([organizationId, assigneeId])
   @@index([organizationId, dueDate])
+  // Branch task queues.
+  @@index([organizationId, branchId, status, dueDate])
   // Covers: overdue tasks (org + status IN + dueDate lt ordered by dueDate
   // asc), pending-task count (org + status IN), tasks page
   // (org + status + dueDate order)

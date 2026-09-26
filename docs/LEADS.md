@@ -35,7 +35,7 @@ These are the default transitions; organizations may later customize the pipelin
 
 ## 4. Key entities and relationships
 
-- **Lead** — org-owned; belongs to a `location` and an `owner_user` (current assignee).
+- **Lead** — org-owned; belongs to a `branch` (nullable — org-level leads are visible to every branch scope) and an `owner_user` (current assignee).
 - **LeadActivity** — a CRM touchpoint (note/call/message/visit/email) on a lead.
 - **FollowUp** — a scheduled activity with a due time and assignee.
 - **Appointment** — scheduled visit with a lead (or member); see below.
@@ -43,7 +43,7 @@ These are the default transitions; organizations may later customize the pipelin
 ## 5. Core workflows
 
 ### 5.1 Lead creation
-1. Input validated; `organization_id` and location derived server-side.
+1. Input validated; `organization_id` and branch derived server-side (write branch resolved via `resolveWriteBranch`, validated against the user's assignment).
 2. Source required; duplicate-detection by email/phone within the org flags potential dupes.
 3. Lead starts at `new`, assigned to the default/available owner.
 
@@ -66,7 +66,7 @@ These are the default transitions; organizations may later customize the pipelin
 
 ## 7. Appointments (CRM side)
 
-An **Appointment** binds a lead or member to a staff user and a location with a time range. Status: `scheduled`, `completed`, `cancelled`, `no-show`. Only staff with `appointment:*` permission at the governing location can modify. See `DATABASE_DESIGN.md` §4.17.
+An **Appointment** binds a lead or member to a staff user and a branch with a time range. Status: `scheduled`, `completed`, `cancelled`, `no-show`. Only staff with `appointment:*` permission for the governing branch can modify (branch resolved server-side). See `DATABASE_DESIGN.md` §4.17.
 
 ## 8. Automation hooks
 

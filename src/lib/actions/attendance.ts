@@ -20,6 +20,8 @@ import {
 } from "@/lib/member-device"
 import { manualCheckinSchema, qrSessionSchema, qrCheckinSchema } from "@/lib/validators"
 import type { ManualCheckinInput, QrSessionInput } from "@/lib/validators"
+import { decideQrBranchGate } from "@/lib/branch-rules"
+import { getBranchAccess, resolveWriteBranch } from "@/lib/branches"
 
 type ActionResult = { success: boolean; error?: string; fieldErrors?: Record<string, string> }
 
@@ -44,24 +46,25 @@ const QR_ERRORS = {
   invalid: "Invalid QR code",
   revoked: "QR code has been revoked",
   expired: "QR code has expired",
+  branchInactive: "This QR code is no longer active",
   memberNotFound: "Member not found",
   memberNotActive: "Member is not active",
 } as const
 
-function qrSessionError(code: "invalid" | "revoked" | "expired"): string {
-  return QR_ERRORS[code]
+function qrSessionError(code: "invalid" | "revoked" | "expired" | "branch_inactive"): string {
+  return code === "branch_inactive" ? QR_ERRORS.branchInactive : QR_ERRORS[code]
 }
 
 type QrSessionContext = {
   id: string
   organizationId: string
-  locationId: string
+  branchId: string
   timezone: string
 }
 
 type QrSessionResolution =
   | { ok: true; context: QrSessionContext }
-  | { ok: false; error: "invalid" | "revoked" | "expired" }
+  | { ok: false; error: "invalid" | "revoked" | "expired" | "branch_inactive" }
 
 type QrMemberContext = {
   id: string
@@ -77,21 +80,27 @@ async function resolveQrSession(token: string): Promise<QrSessionResolution> {
     select: {
       id: true,
       organizationId: true,
-      locationId: true,
+      branchId: true,
       expiresAt: true,
       revokedAt: true,
+      branch: { select: { status: true } },
       organization: { select: { timezone: true } },
     },
   })
   if (!session) return { ok: false, error: "invalid" }
   if (session.revokedAt) return { ok: false, error: "revoked" }
   if (session.expiresAt < new Date()) return { ok: false, error: "expired" }
+  // A session created while the branch was active stops scanning once the
+  // branch is deactivated — the QR lives, the branch gate blocks new entries.
+  if (!decideQrBranchGate({ branchStatus: session.branch.status }).allowed) {
+    return { ok: false, error: "branch_inactive" }
+  }
   return {
     ok: true,
     context: {
       id: session.id,
       organizationId: session.organizationId,
-      locationId: session.locationId,
+      branchId: session.branchId,
       timezone: session.organization.timezone,
     },
   }
@@ -203,7 +212,7 @@ async function performQrScan(args: {
         data: {
           organizationId: session.organizationId,
           memberId: member.id,
-          locationId: session.locationId,
+          branchId: session.branchId,
           qrSessionId: session.id,
           source: "QR_SESSION",
           dayKey: todayKey,
@@ -250,6 +259,7 @@ async function performQrScan(args: {
           data: {
             organizationId: session.organizationId,
             memberId: member.id,
+            branchId: session.branchId,
             qrSessionId: session.id,
             source: "QR_SESSION",
             status: "PENDING",
@@ -334,7 +344,10 @@ export async function manualCheckin(input: ManualCheckinInput): Promise<ActionRe
     return { success: false, error: "Invalid input", fieldErrors }
   }
 
-  const { memberId, locationId } = parsed.data
+  const { memberId, branchId: requestedBranchId } = parsed.data
+  const resolved = await resolveWriteBranch(requestedBranchId)
+  if (!resolved.ok) return { success: false, error: resolved.error }
+
   const member = await prisma.member.findFirst({
     where: { id: memberId, organizationId: user.organizationId, deletedAt: null },
   })
@@ -351,7 +364,7 @@ export async function manualCheckin(input: ManualCheckinInput): Promise<ActionRe
     data: {
       organizationId: user.organizationId,
       memberId,
-      locationId: locationId ?? null,
+      branchId: resolved.branchId,
       source: "MANUAL",
       dayKey,
     },
@@ -363,7 +376,7 @@ export async function manualCheckin(input: ManualCheckinInput): Promise<ActionRe
     action: AUDIT_ACTIONS.CHECKIN_MANUAL,
     entityType: "CheckIn",
     entityId: checkIn.id,
-    after: { memberId, dayKey, source: "MANUAL" },
+    after: { memberId, dayKey, source: "MANUAL", branchId: resolved.branchId },
   })
 
   revalidatePath("/dashboard/attendance")
@@ -384,7 +397,27 @@ export async function createQrSession(input: QrSessionInput): Promise<ActionResu
     return { success: false, error: "Invalid input", fieldErrors }
   }
 
-  const { locationId, label, expiresInMinutes } = parsed.data
+  const { branchId: requestedBranchId, label, expiresInMinutes } = parsed.data
+
+  // Resolve + gate the branch: restricted users can only create sessions for
+  // their accessible branches; an INACTIVE branch never issues new QR codes.
+  const branchAccess = await getBranchAccess()
+  const resolved = await resolveWriteBranch(requestedBranchId)
+  if (!resolved.ok) return { success: false, error: resolved.error }
+  const branch = await prisma.branch.findFirst({
+    where: { id: resolved.branchId, organizationId: user.organizationId },
+    select: { id: true, status: true },
+  })
+  if (!branch || !decideQrBranchGate({ branchStatus: branch.status }).allowed) {
+    return { success: false, error: "Branch is inactive" }
+  }
+  if (
+    branchAccess.mode !== "all" &&
+    !branchAccess.accessibleBranches.some((b) => b.id === resolved.branchId)
+  ) {
+    return { success: false, error: "You do not have access to this branch" }
+  }
+
   const token = randomUUID()
   const tokenHash = hashToken(token)
   const expiresAt = new Date(Date.now() + expiresInMinutes * 60_000)
@@ -392,7 +425,7 @@ export async function createQrSession(input: QrSessionInput): Promise<ActionResu
   const session = await prisma.qRSession.create({
     data: {
       organizationId: user.organizationId,
-      locationId,
+      branchId: resolved.branchId,
       label: label ?? null,
       tokenHash,
       expiresAt,
@@ -406,7 +439,7 @@ export async function createQrSession(input: QrSessionInput): Promise<ActionResu
     action: AUDIT_ACTIONS.QR_SESSION_CREATED,
     entityType: "QRSession",
     entityId: session.id,
-    after: { locationId, label, expiresInMinutes },
+    after: { branchId: resolved.branchId, label, expiresInMinutes },
   })
 
   revalidatePath("/dashboard/attendance")

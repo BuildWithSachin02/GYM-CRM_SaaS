@@ -2,6 +2,8 @@ import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/auth"
+import { requireBranchAccess, getBranchFilter } from "@/lib/branches"
+import { branchFilterWhereRequired } from "@/lib/branch-scope"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
 import { dayKeyInTimeZone } from "@/lib/memberships"
@@ -18,12 +20,14 @@ export default async function AttendanceRequestsRoute() {
   if (!can(user, "attendance:view")) {
     redirect("/dashboard")
   }
+  await requireBranchAccess()
+  const branchClause = branchFilterWhereRequired(await getBranchFilter())
 
   const timeZone = user.organization.timezone
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
 
   const requests = await prisma.attendanceRequest.findMany({
-    where: { organizationId: user.organizationId },
+    where: { organizationId: user.organizationId, ...branchClause },
     orderBy: [{ requestedAt: "desc" }],
     take: 200,
     include: {

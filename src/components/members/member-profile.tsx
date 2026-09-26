@@ -132,7 +132,7 @@ type MemberProfileProps = {
       dayKey: string
       source: "MANUAL" | "QR_SESSION"
       checkedInAt: string
-      locationName: string | null
+      branchName: string | null
     }[]
     checkInCount: number
     /** Total of RECORDED payments for this member (not just recent rows). */
@@ -539,7 +539,7 @@ export function MemberProfile({
                             </StatusBadge>
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {checkIn.locationName ?? "—"}
+                            {checkIn.branchName ?? "—"}
                           </TableCell>
                         </TableRow>
                       ))}

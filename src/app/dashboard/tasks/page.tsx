@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 
 import { TaskList } from "@/components/tasks/task-list"
 
@@ -15,6 +17,8 @@ type SearchParams = Promise<{
   status?: string
   assignee?: string
   page?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 const VALID_STATUSES = ["TODO", "IN_PROGRESS", "COMPLETED"] as const
@@ -26,7 +30,11 @@ export default async function TasksPage({
 }) {
   const user = await requireUser()
   if (!can(user, "tasks:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhere(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const statusFilter = params.status?.trim() || ""
   const assigneeFilter = params.assignee?.trim() || ""
@@ -36,6 +44,7 @@ export default async function TasksPage({
 
   const where: Record<string, unknown> = {
     organizationId: user.organizationId,
+    ...branchClause,
   }
 
   if (statusFilter && (VALID_STATUSES as readonly string[]).includes(statusFilter)) {
@@ -68,18 +77,30 @@ export default async function TasksPage({
       },
     }),
     prisma.task.count({ where }),
+    // Users carry NO branchId (access comes from UserBranch), so the assignee
+    // picker stays org-wide.
     prisma.user.findMany({
       where: { organizationId: user.organizationId, status: "ACTIVE" },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     prisma.member.findMany({
-      where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
+      where: {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        status: "ACTIVE",
+        ...memberBranchClause,
+      },
       orderBy: { firstName: "asc" },
       select: { id: true, firstName: true, lastName: true, memberCode: true },
     }),
     prisma.lead.findMany({
-      where: { organizationId: user.organizationId, deletedAt: null, stage: { not: "CONVERTED" } },
+      where: {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        stage: { not: "CONVERTED" },
+        ...branchClause,
+      },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),

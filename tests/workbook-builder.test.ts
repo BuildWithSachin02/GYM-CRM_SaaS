@@ -48,7 +48,7 @@ function memberRow(id: string): ExportRowMap["members"] {
     createdAt: NOW,
     updatedAt: NOW,
     trainer: null,
-    location: { name: "King's Gym" },
+    homeBranch: { name: "King's Gym" },
   }
 }
 
@@ -105,7 +105,7 @@ function attendanceRow(id: string): ExportRowMap["attendance"] {
     checkedInAt: NOW,
     source: "MANUAL",
     member: { firstName: "Aarav", lastName: "Sharma" },
-    location: null,
+    branch: null,
     qrSession: null,
   }
 }
@@ -126,7 +126,7 @@ function leadRow(id: string): ExportRowMap["leads"] {
     deletedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
-    location: null,
+    branch: null,
     interestedPlan: null,
     ownerUser: null,
     convertedMember: null,
@@ -146,7 +146,7 @@ function appointmentRow(id: string): ExportRowMap["appointments"] {
     lead: null,
     trainer: null,
     staff: null,
-    location: null,
+    branch: null,
   }
 }
 
@@ -173,7 +173,7 @@ function qrSessionRow(id: string): ExportRowMap["qrSessions"] {
     expiresAt: NOW,
     revokedAt: null,
     createdAt: NOW,
-    location: { name: "King's Gym" },
+    branch: { name: "King's Gym" },
     createdBy: { name: "Ravi Verma" },
   }
 }

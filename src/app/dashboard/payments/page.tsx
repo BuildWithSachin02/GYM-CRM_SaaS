@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
 import type { Prisma } from "@prisma/client"
 import { getOutstandingDuesRows } from "@/lib/domain/outstanding"
 import { matchesDuesSearch } from "@/lib/outstanding"
@@ -25,6 +27,8 @@ type SearchParams = Promise<{
   to?: string
   page?: string
   dueStatus?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 /**
@@ -52,7 +56,11 @@ export default async function PaymentsPage({
 }) {
   const user = await requireUser()
   if (!can(user, "payments:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhereRequired(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const q = params.q?.trim() || ""
   const methodFilter = params.method?.trim() || ""
@@ -69,8 +77,17 @@ export default async function PaymentsPage({
   // outstanding balance can still be settled; history mode keeps the existing
   // ACTIVE-only picker.
   const memberWhere: Prisma.MemberWhereInput = dueStatus
-    ? { organizationId: user.organizationId, deletedAt: null }
-    : { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" }
+    ? {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        ...memberBranchClause,
+      }
+    : {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        status: "ACTIVE",
+        ...memberBranchClause,
+      }
 
   const [members, paymentTotals, duesRows] = await Promise.all([
     prisma.member.findMany({
@@ -83,7 +100,7 @@ export default async function PaymentsPage({
         phone: true,
         memberCode: true,
         memberships: {
-          where: { status: { not: "CANCELLED" } },
+          where: { status: { not: "CANCELLED" }, ...branchClause },
           orderBy: [{ endDate: "desc" }],
           select: {
             id: true,
@@ -106,11 +123,16 @@ export default async function PaymentsPage({
         organizationId: user.organizationId,
         status: "RECORDED",
         membershipId: { not: null },
+        ...branchClause,
       },
       _sum: { amountMinor: true },
     }),
     dueStatus
-      ? getOutstandingDuesRows(user.organizationId, user.organization.timezone)
+      ? getOutstandingDuesRows(
+          user.organizationId,
+          user.organization.timezone,
+          branchFilter
+        )
       : Promise.resolve([] as Awaited<ReturnType<typeof getOutstandingDuesRows>>),
   ])
 
@@ -131,8 +153,11 @@ export default async function PaymentsPage({
   const duesTotalPages = Math.ceil(duesTotal / PAGE_SIZE)
 
   // ---- Payment history view (default) -------------------------------------
+  // Top level has no `OR` of its own (the search OR lives inside the nested
+  // member filter), so the branch clause spreads in as-is.
   const where: Record<string, unknown> = {
     organizationId: user.organizationId,
+    ...branchClause,
   }
 
   if (q) {

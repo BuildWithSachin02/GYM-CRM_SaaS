@@ -94,7 +94,7 @@ test("members row maps one cell per header and redacts secrets", () => {
     createdAt: new Date(hoursAt(10)),
     updatedAt: new Date(hoursAt(11)),
     trainer: { user: { name: "Ravi Verma" } },
-    location: { name: "King's Gym" },
+    homeBranch: { name: "King's Gym" },
   }
   const cells = mapExportRow("members", row, TZ)
   assert.equal(cells.length, EXPORT_COLUMNS.members.length)
@@ -212,7 +212,7 @@ test("attendance row keeps the org-local dayKey, source and optional QR label", 
     checkedInAt: new Date(hoursAt(23)),
     source: "QR_SESSION",
     member: { firstName: "Aarav", lastName: "Sharma", memberCode: "MEM-0001" },
-    location: null,
+    branch: null,
     qrSession: { id: "qr-9", label: "Main desk" },
   }
   const cells = mapExportRow("attendance", row, TZ)
@@ -242,7 +242,7 @@ test("leads row maps owner, plan, conversion and timestamps", () => {
     deletedAt: null,
     createdAt: new Date(hoursAt(6)),
     updatedAt: new Date(hoursAt(6)),
-    location: { name: "King's Gym" },
+    branch: { name: "King's Gym" },
     interestedPlan: { name: "Monthly Silver" },
     ownerUser: { name: "Ravi Verma" },
     convertedMember: { firstName: "Ananya", lastName: "Joshi" },
@@ -269,7 +269,7 @@ test("appointments and tasks keep optional participants empty-safe", () => {
     lead: { id: "lead-2", name: "Neha Gupta" },
     trainer: null,
     staff: null,
-    location: { name: "Main floor" },
+    branch: { name: "Main floor" },
   }
   const aptCells = mapExportRow("appointments", appointment, TZ)
   assert.equal(aptCells.length, EXPORT_COLUMNS.appointments.length)
@@ -308,7 +308,7 @@ test("QR session and lead activity rows map cleanly", () => {
     expiresAt: new Date(hoursAt(20)),
     revokedAt: null,
     createdAt: new Date(hoursAt(20)),
-    location: { name: "King's Gym" },
+    branch: { name: "King's Gym" },
     createdBy: { name: "Ravi Verma" },
   }
   const qrCells = mapExportRow("qrSessions", qr, TZ)

@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
 import {
   dayKeyInTimeZone,
   getMemberCoverage,
@@ -27,6 +29,8 @@ type SearchParams = Promise<{
   status?: string
   page?: string
   member?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -92,7 +96,11 @@ export default async function MembershipsPage({
 }) {
   const user = await requireUser()
   if (!can(user, "memberships:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhereRequired(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
   const timeZone = user.organization.timezone
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
   const canManage = can(user, "memberships:manage")
@@ -115,6 +123,7 @@ export default async function MembershipsPage({
       organizationId: user.organizationId,
       status: "RECORDED",
       membershipId: { not: null },
+      ...branchClause,
     },
     _sum: { amountMinor: true },
   })
@@ -132,6 +141,7 @@ export default async function MembershipsPage({
             id: memberFilter,
             organizationId: user.organizationId,
             deletedAt: null,
+            ...memberBranchClause,
           },
           select: { id: true, firstName: true, lastName: true, memberCode: true },
         })
@@ -139,7 +149,11 @@ export default async function MembershipsPage({
     if (!target) notFound()
 
     const rows = await prisma.membership.findMany({
-      where: { organizationId: user.organizationId, memberId: target.id },
+      where: {
+        organizationId: user.organizationId,
+        memberId: target.id,
+        ...branchClause,
+      },
       include: {
         plan: { select: { id: true, name: true } },
       },
@@ -162,6 +176,7 @@ export default async function MembershipsPage({
   const memberships = await prisma.membership.findMany({
     where: {
       organizationId: user.organizationId,
+      ...branchClause,
     },
     include: {
       member: { select: { id: true, firstName: true, lastName: true, memberCode: true } },
@@ -177,7 +192,7 @@ export default async function MembershipsPage({
     rowsByMember.set(row.memberId, list)
   }
 
-  const stats = await getMembershipLifecycleStats(user.organizationId, timeZone)
+  const stats = await getMembershipLifecycleStats(user.organizationId, timeZone, branchFilter)
 
   const entries = []
   for (const [memberId, rows] of rowsByMember) {
@@ -241,7 +256,12 @@ export default async function MembershipsPage({
   const pageEntries = entries.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const members = await prisma.member.findMany({
-    where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
+    where: {
+      organizationId: user.organizationId,
+      deletedAt: null,
+      status: "ACTIVE",
+      ...memberBranchClause,
+    },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
   })

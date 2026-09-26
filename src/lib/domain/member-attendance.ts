@@ -2,6 +2,8 @@ import "server-only"
 
 import { prisma } from "@/lib/prisma"
 import { dayKeyInTimeZone } from "@/lib/memberships"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
+import type { BranchFilter } from "@/lib/branch-scope"
 import {
   buildAttendanceCalendar,
   buildAttendanceTrend,
@@ -23,7 +25,7 @@ export type AttendanceCheckinRow = {
   dayKey: string
   source: "MANUAL" | "QR_SESSION"
   checkedInAt: string
-  locationName: string | null
+  branchName: string | null
 }
 
 export type MemberAttendanceOverview = {
@@ -87,7 +89,7 @@ const checkinSelect = {
   dayKey: true,
   source: true,
   checkedInAt: true,
-  location: { select: { name: true } },
+  branch: { select: { name: true } },
 } as const
 
 type CheckinRow = {
@@ -95,7 +97,7 @@ type CheckinRow = {
   dayKey: string
   source: "MANUAL" | "QR_SESSION"
   checkedInAt: Date
-  location: { name: string } | null
+  branch: { name: string } | null
 }
 
 function serializeCheckin(row: CheckinRow): AttendanceCheckinRow {
@@ -104,7 +106,7 @@ function serializeCheckin(row: CheckinRow): AttendanceCheckinRow {
     dayKey: row.dayKey,
     source: row.source,
     checkedInAt: row.checkedInAt.toISOString(),
-    locationName: row.location?.name ?? null,
+    branchName: row.branch?.name ?? null,
   }
 }
 
@@ -115,23 +117,25 @@ function serializeCheckin(row: CheckinRow): AttendanceCheckinRow {
 export async function getMemberAttendanceOverview(
   organizationId: string,
   memberId: string,
-  timeZone: string
+  timeZone: string,
+  branchFilter: BranchFilter
 ): Promise<MemberAttendanceOverview> {
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
+  const branchWhere = branchFilterWhereRequired(branchFilter)
 
   const [dayKeyRows, lastRow, recent] = await Promise.all([
     prisma.checkIn.findMany({
-      where: { organizationId, memberId },
+      where: { organizationId, memberId, ...branchWhere },
       orderBy: { dayKey: "asc" },
       select: { dayKey: true },
     }),
     prisma.checkIn.findFirst({
-      where: { organizationId, memberId },
+      where: { organizationId, memberId, ...branchWhere },
       orderBy: { dayKey: "desc" },
       select: checkinSelect,
     }),
     prisma.checkIn.findMany({
-      where: { organizationId, memberId },
+      where: { organizationId, memberId, ...branchWhere },
       orderBy: { checkedInAt: "desc" },
       take: 20,
       select: checkinSelect,
@@ -166,21 +170,23 @@ export async function getMemberAttendanceView(
   timeZone: string,
   range: AttendanceRange,
   page: number,
-  pageSize: number
+  pageSize: number,
+  branchFilter: BranchFilter
 ): Promise<MemberAttendanceView | null> {
   const member = await prisma.member.findFirst({
-    where: { id: memberId, organizationId, deletedAt: null },
+    where: { id: memberId, organizationId, deletedAt: null, ...branchFilterWhere(branchFilter, "homeBranchId") },
     select: { id: true, firstName: true, lastName: true, memberCode: true, status: true },
   })
   if (!member) return null
 
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
-  const where = rangeWhere(organizationId, memberId, range)
+  const branchWhere = branchFilterWhereRequired(branchFilter)
+  const where = { ...rangeWhere(organizationId, memberId, range), ...branchWhere }
   const skip = (page - 1) * pageSize
 
   const [dayKeyRows, lastRow, checkins, totalCount] = await Promise.all([
     prisma.checkIn.findMany({
-      where: { organizationId, memberId },
+      where: { organizationId, memberId, ...branchWhere },
       orderBy: { dayKey: "asc" },
       select: { dayKey: true },
     }),

@@ -7,6 +7,11 @@ import {
 import { cache } from "react"
 
 import { prisma } from "@/lib/prisma"
+import {
+  branchFilterWhere,
+  branchFilterWhereRequired,
+  type BranchFilter,
+} from "@/lib/branch-scope"
 import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
 import { getAttendanceTrendByDay, getRevenueAnalysis } from "@/lib/analytics"
 import {
@@ -16,6 +21,12 @@ import {
 } from "@/lib/memberships"
 
 const DAY = 24 * 60 * 60 * 1000
+
+/**
+ * The org-wide scope used whenever a caller omits the branch filter. A single
+ * shared reference so the React-cached loaders below still deduplicate on it.
+ */
+const ORG_WIDE: BranchFilter = { kind: "all" }
 
 export type DashboardData = {
   stats: {
@@ -86,13 +97,14 @@ export type DashboardData = {
 
 export async function getDashboardData(
   organizationId: string,
-  timeZone: string
+  timeZone: string,
+  branchFilter?: BranchFilter
 ): Promise<DashboardData> {
   const [statsData, trends, activity, remaining] = await Promise.all([
-    getDashboardStatsData(organizationId, timeZone),
-    getDashboardTrendsData(organizationId, timeZone),
-    getDashboardActivityData(organizationId),
-    getDashboardRemainingData(organizationId, timeZone),
+    getDashboardStatsData(organizationId, timeZone, branchFilter),
+    getDashboardTrendsData(organizationId, timeZone, branchFilter),
+    getDashboardActivityData(organizationId, branchFilter),
+    getDashboardRemainingData(organizationId, timeZone, branchFilter),
   ])
 
   return {
@@ -119,13 +131,25 @@ export type DashboardStatsData = {
  * Segment loader for the dashboard stats row (8 stat cards).
  * Shares the request-scoped membership lifecycle scan and the
  * next-week appointments query with other segments via React cache().
+ *
+ * `branchFilter` is optional (omitted = org-wide). A fail-closed filter makes
+ * every stat zero because each query matches nothing.
  */
 export async function getDashboardStatsData(
   organizationId: string,
-  timeZone: string
+  timeZone: string,
+  branchFilter?: BranchFilter
 ): Promise<DashboardStatsData> {
   const todayEnd = endOfDay(new Date())
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
+  const branchFilterOrAll = branchFilter ?? ORG_WIDE
+  // Two classes of model, two builders: Lead.branchId is NULLABLE (a website
+  // lead has no branch yet) so it keeps the org-wide arm, while CheckIn.branchId
+  // is NOT NULL and must never receive one.
+  const leadWhere = branchFilterWhere(branchFilterOrAll)
+  const checkInWhere = branchFilterWhereRequired(branchFilterOrAll)
+  // Members are scoped by their home branch, not by a branch column of their own.
+  const memberBranchWhere = branchFilterWhere(branchFilterOrAll, "homeBranchId")
 
   const [
     lifecycleStats,
@@ -137,25 +161,35 @@ export async function getDashboardStatsData(
     pendingFollowUps,
     nextWeekAppointments,
   ] = await Promise.all([
-    getMembershipLifecycleStats(organizationId, timeZone),
-    prisma.member.count({ where: { organizationId, deletedAt: null } }),
+    getMembershipLifecycleStats(organizationId, timeZone, branchFilter),
     prisma.member.count({
-      where: { organizationId, deletedAt: null, status: "ACTIVE" },
+      where: { organizationId, deletedAt: null, ...memberBranchWhere },
     }),
-    prisma.checkIn.count({ where: { organizationId, dayKey: todayKey } }),
+    prisma.member.count({
+      where: {
+        organizationId,
+        deletedAt: null,
+        status: "ACTIVE",
+        ...memberBranchWhere,
+      },
+    }),
+    prisma.checkIn.count({ where: { organizationId, dayKey: todayKey, ...checkInWhere } }),
     // Canonical today revenue: same org-timezone attribution as every other
     // revenue chart (see getRevenueAnalysis).
-    getRevenueAnalysis(organizationId, timeZone, 1).then((r) => r.totalMinor),
-    prisma.lead.count({ where: { organizationId, deletedAt: null, stage: "NEW" } }),
+    getRevenueAnalysis(organizationId, timeZone, 1, branchFilter).then((r) => r.totalMinor),
+    prisma.lead.count({
+      where: { organizationId, deletedAt: null, stage: "NEW", ...leadWhere },
+    }),
     prisma.lead.count({
       where: {
         organizationId,
         deletedAt: null,
         stage: { in: ["NEW", "CONTACTED", "VISIT_SCHEDULED", "VISIT_DONE"] },
         followUpDate: { lte: todayEnd },
+        ...leadWhere,
       },
     }),
-    getDashboardUpcomingAppointments(organizationId),
+    getDashboardUpcomingAppointments(organizationId, branchFilterOrAll),
   ])
 
   return {
@@ -178,14 +212,16 @@ export async function getDashboardStatsData(
  * Both trends use the same org-timezone day-key attribution as the stat
  * cards, so "today's revenue" reconciles with the last point of the revenue
  * trend and the attendance counts reconcile with the attendance trend.
+ * `branchFilter` (optional; omitted = org-wide) narrows both series.
  */
 export async function getDashboardTrendsData(
   organizationId: string,
-  timeZone: string
+  timeZone: string,
+  branchFilter?: BranchFilter
 ): Promise<Pick<DashboardData, "revenueTrend" | "attendanceTrend">> {
   const [revenue, attendance] = await Promise.all([
-    getRevenueAnalysis(organizationId, timeZone, 30),
-    getAttendanceTrendByDay(organizationId, timeZone, 14),
+    getRevenueAnalysis(organizationId, timeZone, 30, branchFilter),
+    getAttendanceTrendByDay(organizationId, timeZone, 14, branchFilter),
   ])
   return {
     revenueTrend: revenue.trend.map((t) => ({ day: t.label, revenue: t.value })),
@@ -195,18 +231,21 @@ export async function getDashboardTrendsData(
 
 /**
  * Segment loader for recent activity widgets (payments, members, leads).
+ * `branchFilter` (optional; omitted = org-wide) narrows every widget.
  */
 export async function getDashboardActivityData(
-  organizationId: string
+  organizationId: string,
+  branchFilter?: BranchFilter
 ): Promise<
   Pick<DashboardData, "recentPayments" | "recentMembers" | "newLeadsToday" | "leadPipeline">
 > {
+  const filter = branchFilter ?? ORG_WIDE
   const [recentPayments, recentMembers, newLeadsToday, leadPipeline] =
     await Promise.all([
-      getRecentPayments(organizationId),
-      getRecentMembers(organizationId),
-      getNewLeads(organizationId),
-      getLeadPipeline(organizationId),
+      getRecentPayments(organizationId, filter),
+      getRecentMembers(organizationId, filter),
+      getNewLeads(organizationId, filter),
+      getLeadPipeline(organizationId, filter),
     ])
   return { recentPayments, recentMembers, newLeadsToday, leadPipeline }
 }
@@ -214,22 +253,25 @@ export async function getDashboardActivityData(
 /**
  * Segment loader for the remaining dashboard widgets
  * (expiring, today's appointments, overdue tasks, upcoming appointments).
+ * `branchFilter` (optional; omitted = org-wide) narrows every widget.
  */
 export async function getDashboardRemainingData(
   organizationId: string,
-  timeZone: string
+  timeZone: string,
+  branchFilter?: BranchFilter
 ): Promise<
   Pick<
     DashboardData,
     "expiringMemberships" | "todayAppointments" | "overdueTasks" | "nextWeekAppointments"
   >
 > {
+  const filter = branchFilter ?? ORG_WIDE
   const [expiringMemberships, todayAppointments, overdueTasks, nextWeekAppointments] =
     await Promise.all([
-      getExpiringMemberships(organizationId, timeZone),
-      getTodayAppointments(organizationId),
-      getOverdueTasks(organizationId),
-      getDashboardUpcomingAppointments(organizationId),
+      getExpiringMemberships(organizationId, timeZone, filter),
+      getTodayAppointments(organizationId, filter),
+      getOverdueTasks(organizationId, filter),
+      getDashboardUpcomingAppointments(organizationId, filter),
     ])
   return { expiringMemberships, todayAppointments, overdueTasks, nextWeekAppointments }
 }
@@ -247,12 +289,19 @@ function addDays(d: Date, n: number) {
  * keeps their coverage (and so is NOT listed here) until the farthest covered
  * day. Members not covered today (already expired, or only upcoming) are
  * likewise excluded — they need a different follow-up, not an "expiring" badge.
+ *
+ * Only memberships inside the branch scope are scanned, so coverage is derived
+ * from the branches the viewer can actually see.
  */
-async function getExpiringMemberships(organizationId: string, timeZone: string) {
+async function getExpiringMemberships(
+  organizationId: string,
+  timeZone: string,
+  branchFilter: BranchFilter
+) {
   const today = new Date()
   const todayKey = dayKeyInTimeZone(today, timeZone)
   const rows = await prisma.membership.findMany({
-    where: { organizationId },
+    where: { organizationId, ...branchFilterWhereRequired(branchFilter) },
     select: {
       id: true,
       memberId: true,
@@ -294,12 +343,13 @@ async function getExpiringMemberships(organizationId: string, timeZone: string) 
     .slice(0, 12)
 }
 
-async function getOverdueTasks(organizationId: string) {
+async function getOverdueTasks(organizationId: string, branchFilter: BranchFilter) {
   const rows = await prisma.task.findMany({
     where: {
       organizationId,
       status: { in: ["TODO", "IN_PROGRESS"] },
       dueDate: { lt: endOfDay(new Date()) },
+      ...branchFilterWhere(branchFilter),
     },
     orderBy: { dueDate: "asc" },
     take: 6,
@@ -318,11 +368,15 @@ async function getOverdueTasks(organizationId: string) {
   }))
 }
 
-async function getTodayAppointments(organizationId: string) {
+async function getTodayAppointments(organizationId: string, branchFilter: BranchFilter) {
   const todayStart = startOfDay(new Date())
   const todayEnd = endOfDay(new Date())
   const rows = await prisma.appointment.findMany({
-    where: { organizationId, startsAt: { gte: todayStart, lte: todayEnd } },
+    where: {
+      organizationId,
+      startsAt: { gte: todayStart, lte: todayEnd },
+      ...branchFilterWhere(branchFilter),
+    },
     orderBy: { startsAt: "asc" },
     take: 6,
     select: {
@@ -349,9 +403,9 @@ async function getTodayAppointments(organizationId: string) {
   }))
 }
 
-async function getRecentPayments(organizationId: string) {
+async function getRecentPayments(organizationId: string, branchFilter: BranchFilter) {
   const rows = await prisma.payment.findMany({
-    where: { organizationId, status: "RECORDED" },
+    where: { organizationId, status: "RECORDED", ...branchFilterWhereRequired(branchFilter) },
     orderBy: { paymentDate: "desc" },
     take: 6,
     select: {
@@ -375,9 +429,13 @@ async function getRecentPayments(organizationId: string) {
   }))
 }
 
-async function getRecentMembers(organizationId: string) {
+async function getRecentMembers(organizationId: string, branchFilter: BranchFilter) {
   const rows = await prisma.member.findMany({
-    where: { organizationId, deletedAt: null },
+    where: {
+      organizationId,
+      deletedAt: null,
+      ...branchFilterWhere(branchFilter, "homeBranchId"),
+    },
     orderBy: { createdAt: "desc" },
     take: 5,
     select: {
@@ -401,13 +459,14 @@ async function getRecentMembers(organizationId: string) {
   }))
 }
 
-async function getNewLeads(organizationId: string) {
+async function getNewLeads(organizationId: string, branchFilter: BranchFilter) {
   const rows = await prisma.lead.findMany({
     where: {
       organizationId,
       deletedAt: null,
       stage: { in: ["NEW", "CONTACTED", "VISIT_SCHEDULED"] },
       followUpDate: { lte: endOfDay(addDays(new Date(), 3)) },
+      ...branchFilterWhere(branchFilter),
     },
     orderBy: { followUpDate: "asc" },
     take: 6,
@@ -430,10 +489,10 @@ async function getNewLeads(organizationId: string) {
   }))
 }
 
-async function getLeadPipeline(organizationId: string) {
+async function getLeadPipeline(organizationId: string, branchFilter: BranchFilter) {
   const rows = await prisma.lead.groupBy({
     by: ["stage"],
-    where: { organizationId, deletedAt: null },
+    where: { organizationId, deletedAt: null, ...branchFilterWhere(branchFilter) },
     _count: { _all: true },
   })
   return rows.map((r) => ({ stage: r.stage, count: r._count._all }))
@@ -442,18 +501,22 @@ async function getLeadPipeline(organizationId: string) {
 /**
  * Deduplicates the next-week appointments query across the dashboard's
  * Suspense segments within the same request (stats card + upcoming widget).
+ * The branch filter is part of the cache key: the same organization yields
+ * different rows per branch scope.
  */
-export const getDashboardUpcomingAppointments = cache((organizationId: string) =>
-  getNextWeekAppointments(organizationId)
+export const getDashboardUpcomingAppointments = cache(
+  (organizationId: string, branchFilter: BranchFilter) =>
+    getNextWeekAppointments(organizationId, branchFilter)
 )
 
-async function getNextWeekAppointments(organizationId: string) {
+async function getNextWeekAppointments(organizationId: string, branchFilter: BranchFilter) {
   const todayStart = startOfDay(new Date())
   const rows = await prisma.appointment.findMany({
     where: {
       organizationId,
       status: "SCHEDULED",
       startsAt: { gte: todayStart, lte: endOfDay(addDays(todayStart, 7)) },
+      ...branchFilterWhere(branchFilter),
     },
     orderBy: { startsAt: "asc" },
     take: 8,

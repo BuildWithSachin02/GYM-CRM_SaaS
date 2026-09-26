@@ -3,6 +3,12 @@ import "server-only"
 import type { Prisma } from "@prisma/client"
 
 import {
+  branchFilterWhere,
+  branchFilterWhereRequired,
+  type BranchFieldNullability,
+  type BranchFilter,
+} from "@/lib/branch-scope"
+import {
   categoryFilter,
   EXPORT_SHEET_ORDER,
   FINANCIAL_CATEGORIES,
@@ -53,6 +59,58 @@ export type BuildExportArgs = {
   categories: DataCategoryKey[]
   range: DataDateRange
   timeZone: string
+  /**
+   * Branch scope of the requester. Every category that actually carries a
+   * branch column is narrowed by it (members by `homeBranchId`, everything
+   * else by `branchId`); categories without a branch column stay org-wide.
+   */
+  branchFilter: BranchFilter
+}
+
+/**
+ * The branch column a category is scoped by, or `undefined` when the model has
+ * no branch at all.
+ *
+ * Plans, trainers and lead activities are deliberately org-wide: they are
+ * org-level reference/workflow data with no branch column in the schema, so
+ * there is nothing to filter and a clause would be an invalid argument.
+ */
+const BRANCH_FIELD: Partial<Record<DataCategoryKey, string>> = {
+  members: "homeBranchId",
+  memberships: "branchId",
+  payments: "branchId",
+  attendance: "branchId",
+  leads: "branchId",
+  appointments: "branchId",
+  tasks: "branchId",
+  qrSessions: "branchId",
+}
+
+/**
+ * Whether each branch-scoped category's branch column is NULLABLE in the schema.
+ * This is a property of the DATABASE, not of the requester, and it decides which
+ * builder the export may use:
+ *
+ *   required — every row already has a branch: Membership, Payment, CheckIn and
+ *              QRSession all declare `branchId String` (NOT NULL). Prisma rejects
+ *              a `branchId: null` arm for them outright, so the REQUIRED builder
+ *              is mandatory here.
+ *   nullable — the column may be NULL, and NULL means "organization-wide": a
+ *              member with no home branch yet, a website lead, an org task, a
+ *              phone booking. The NULLABLE builder keeps that arm visible.
+ *
+ * Keeping this as an explicit table (rather than inferring it) means adding a new
+ * branch-scoped export category forces a decision about its nullability.
+ */
+const BRANCH_FIELD_NULLABILITY: Partial<Record<DataCategoryKey, BranchFieldNullability>> = {
+  members: "nullable",
+  memberships: "required",
+  payments: "required",
+  attendance: "required",
+  leads: "nullable",
+  appointments: "nullable",
+  tasks: "nullable",
+  qrSessions: "required",
 }
 
 /**
@@ -60,14 +118,28 @@ export type BuildExportArgs = {
  * dashboard already applies to members and leads (`deletedAt: null`) so the
  * workbook never contradicts the in-app lists — but only for export, never for
  * the reset flow which uses categoryFilter() directly.
+ *
+ * It then narrows by the requester's branch scope. `categoryFilter` only ever
+ * produces `organizationId` plus one date field, so the branch fragment's `OR`
+ * (which carries the org-wide `= null` arm for nullable-branch categories)
+ * spreads in without colliding with an existing `OR` key.
  */
 function exportScopeFilter<K extends DataCategoryKey>(
   key: K,
   organizationId: string,
   range: DataDateRange,
-  timeZone: string
+  timeZone: string,
+  branchFilter: BranchFilter
 ): CategoryWhere<K> {
   const base = categoryFilter(key, organizationId, range, timeZone) as Record<string, unknown>
+  const field = BRANCH_FIELD[key]
+  if (field && branchFilter.kind !== "all") {
+    const fragment =
+      BRANCH_FIELD_NULLABILITY[key] === "required"
+        ? branchFilterWhereRequired(branchFilter, field)
+        : branchFilterWhere(branchFilter, field)
+    Object.assign(base, fragment)
+  }
   if (key === "members" || key === "leads") {
     return { ...base, deletedAt: null } as CategoryWhere<K>
   }
@@ -83,6 +155,7 @@ async function fetchBatch(
   organizationId: string,
   range: DataDateRange,
   timeZone: string,
+  branchFilter: BranchFilter,
   cursorId: string | undefined
 ): Promise<AnyExportRow[]> {
   const take = EXPORT_BATCH_SIZE
@@ -90,19 +163,19 @@ async function fetchBatch(
   switch (key) {
     case "members":
       return (await prisma.member.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.MemberWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.MemberWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
           trainer: { select: { user: { select: { name: true } } } },
-          location: { select: { name: true } },
+          homeBranch: { select: { name: true } },
         },
       })) as unknown as ExportRowMap["members"][]
     case "memberships":
       return (await prisma.membership.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.MembershipWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.MembershipWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -114,7 +187,7 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["memberships"][]
     case "plans":
       return (await prisma.membershipPlan.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.MembershipPlanWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.MembershipPlanWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -122,7 +195,7 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["plans"][]
     case "payments":
       return (await prisma.payment.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.PaymentWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.PaymentWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -143,26 +216,26 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["payments"][]
     case "attendance":
       return (await prisma.checkIn.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.CheckInWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.CheckInWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
           member: { select: { firstName: true, lastName: true, memberCode: true } },
-          location: { select: { name: true } },
+          branch: { select: { name: true } },
           qrSession: { select: { id: true, label: true } },
         },
       })) as unknown as ExportRowMap["attendance"][]
     case "leads":
       return (await prisma.lead.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.LeadWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.LeadWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          location: { select: { name: true } },
+          branch: { select: { name: true } },
           interestedPlan: { select: { name: true } },
           ownerUser: { select: { name: true } },
           convertedMember: { select: { firstName: true, lastName: true } },
@@ -170,7 +243,7 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["leads"][]
     case "appointments":
       return (await prisma.appointment.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.AppointmentWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.AppointmentWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -180,12 +253,12 @@ async function fetchBatch(
           lead: { select: { id: true, name: true } },
           trainer: { select: { user: { select: { name: true } } } },
           staff: { select: { name: true } },
-          location: { select: { name: true } },
+          branch: { select: { name: true } },
         },
       })) as unknown as ExportRowMap["appointments"][]
     case "tasks":
       return (await prisma.task.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.TaskWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.TaskWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -199,19 +272,19 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["tasks"][]
     case "qrSessions":
       return (await prisma.qRSession.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.QRSessionWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.QRSessionWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
         skip: cursorId ? 1 : undefined,
         include: {
-          location: { select: { name: true } },
+          branch: { select: { name: true } },
           createdBy: { select: { name: true } },
         },
       })) as unknown as ExportRowMap["qrSessions"][]
     case "leadActivities":
       return (await prisma.leadActivity.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.LeadActivityWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.LeadActivityWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -223,7 +296,7 @@ async function fetchBatch(
       })) as unknown as ExportRowMap["leadActivities"][]
     case "trainers":
       return (await prisma.trainer.findMany({
-        where: exportScopeFilter(key, organizationId, range, timeZone) as Prisma.TrainerWhereInput,
+        where: exportScopeFilter(key, organizationId, range, timeZone, branchFilter) as Prisma.TrainerWhereInput,
         orderBy: { id: "asc" },
         take,
         cursor: cursorId ? { id: cursorId } : undefined,
@@ -250,7 +323,14 @@ async function fetchAllRows(
   const all: AnyExportRow[] = []
   let cursorId: string | undefined
   for (;;) {
-    const rows = await fetchBatch(key, args.organizationId, args.range, args.timeZone, cursorId)
+    const rows = await fetchBatch(
+      key,
+      args.organizationId,
+      args.range,
+      args.timeZone,
+      args.branchFilter,
+      cursorId
+    )
     all.push(...rows)
     if (rows.length < EXPORT_BATCH_SIZE) break
     cursorId = rows[rows.length - 1].id
@@ -263,7 +343,7 @@ async function fetchAllRows(
 // ---------------------------------------------------------------------------
 
 async function loadSummaryCounts(args: BuildExportArgs): Promise<SummaryCounts> {
-  const { organizationId, range, timeZone } = args
+  const { organizationId, range, timeZone, branchFilter } = args
 
   const byStatus = <T extends { status: string }>(
     rows: readonly T[]
@@ -275,21 +355,21 @@ async function loadSummaryCounts(args: BuildExportArgs): Promise<SummaryCounts> 
 
   const memberRows = await prisma.member.groupBy({
     by: ["status"],
-    where: exportScopeFilter("members", organizationId, range, timeZone) as Prisma.MemberWhereInput,
+    where: exportScopeFilter("members", organizationId, range, timeZone, branchFilter) as Prisma.MemberWhereInput,
     _count: { _all: true },
   })
   const memberCounts = byStatus(memberRows)
 
   const membershipRows = await prisma.membership.groupBy({
     by: ["status"],
-    where: exportScopeFilter("memberships", organizationId, range, timeZone) as Prisma.MembershipWhereInput,
+    where: exportScopeFilter("memberships", organizationId, range, timeZone, branchFilter) as Prisma.MembershipWhereInput,
     _count: { _all: true },
   })
   const membershipCounts = byStatus(membershipRows)
 
   const paymentRows = await prisma.payment.groupBy({
     by: ["status"],
-    where: exportScopeFilter("payments", organizationId, range, timeZone) as Prisma.PaymentWhereInput,
+    where: exportScopeFilter("payments", organizationId, range, timeZone, branchFilter) as Prisma.PaymentWhereInput,
     _count: { _all: true },
     _sum: { amountMinor: true },
   })
@@ -301,32 +381,32 @@ async function loadSummaryCounts(args: BuildExportArgs): Promise<SummaryCounts> 
     0
   )
 
-  const leadWhere = exportScopeFilter("leads", organizationId, range, timeZone) as Prisma.LeadWhereInput
+  const leadWhere = exportScopeFilter("leads", organizationId, range, timeZone, branchFilter) as Prisma.LeadWhereInput
 
   const [plans, attendance, leads, convertedLeads, appointments, tasks, qrSessions, leadActivities, trainers] =
     await Promise.all([
       prisma.membershipPlan.count({
-        where: exportScopeFilter("plans", organizationId, range, timeZone) as Prisma.MembershipPlanWhereInput,
+        where: exportScopeFilter("plans", organizationId, range, timeZone, branchFilter) as Prisma.MembershipPlanWhereInput,
       }),
       prisma.checkIn.count({
-        where: exportScopeFilter("attendance", organizationId, range, timeZone) as Prisma.CheckInWhereInput,
+        where: exportScopeFilter("attendance", organizationId, range, timeZone, branchFilter) as Prisma.CheckInWhereInput,
       }),
       prisma.lead.count({ where: leadWhere }),
       prisma.lead.count({ where: { ...leadWhere, stage: "CONVERTED" } }),
       prisma.appointment.count({
-        where: exportScopeFilter("appointments", organizationId, range, timeZone) as Prisma.AppointmentWhereInput,
+        where: exportScopeFilter("appointments", organizationId, range, timeZone, branchFilter) as Prisma.AppointmentWhereInput,
       }),
       prisma.task.count({
-        where: exportScopeFilter("tasks", organizationId, range, timeZone) as Prisma.TaskWhereInput,
+        where: exportScopeFilter("tasks", organizationId, range, timeZone, branchFilter) as Prisma.TaskWhereInput,
       }),
       prisma.qRSession.count({
-        where: exportScopeFilter("qrSessions", organizationId, range, timeZone) as Prisma.QRSessionWhereInput,
+        where: exportScopeFilter("qrSessions", organizationId, range, timeZone, branchFilter) as Prisma.QRSessionWhereInput,
       }),
       prisma.leadActivity.count({
-        where: exportScopeFilter("leadActivities", organizationId, range, timeZone) as Prisma.LeadActivityWhereInput,
+        where: exportScopeFilter("leadActivities", organizationId, range, timeZone, branchFilter) as Prisma.LeadActivityWhereInput,
       }),
       prisma.trainer.count({
-        where: exportScopeFilter("trainers", organizationId, range, timeZone) as Prisma.TrainerWhereInput,
+        where: exportScopeFilter("trainers", organizationId, range, timeZone, branchFilter) as Prisma.TrainerWhereInput,
       }),
     ])
 
@@ -371,10 +451,10 @@ async function loadFinancialAggregation(args: BuildExportArgs): Promise<{
   const hasFinancial = FINANCIAL_CATEGORIES.some((key) => selected.has(key))
   if (!hasFinancial) return null
 
-  const { organizationId, range, timeZone } = args
-  const memberFilter = exportScopeFilter("members", organizationId, range, timeZone) as Prisma.MemberWhereInput
-  const membershipFilter = exportScopeFilter("memberships", organizationId, range, timeZone) as Prisma.MembershipWhereInput
-  const paymentFilter = exportScopeFilter("payments", organizationId, range, timeZone) as Prisma.PaymentWhereInput
+  const { organizationId, range, timeZone, branchFilter } = args
+  const memberFilter = exportScopeFilter("members", organizationId, range, timeZone, branchFilter) as Prisma.MemberWhereInput
+  const membershipFilter = exportScopeFilter("memberships", organizationId, range, timeZone, branchFilter) as Prisma.MembershipWhereInput
+  const paymentFilter = exportScopeFilter("payments", organizationId, range, timeZone, branchFilter) as Prisma.PaymentWhereInput
 
   const ids = new Set<string>()
 
@@ -402,6 +482,8 @@ async function loadFinancialAggregation(args: BuildExportArgs): Promise<{
   if (ids.size === 0) return null
 
   const idList = [...ids]
+  // Identity lookup only (name + display code) for members that the
+  // branch-scoped filters above already proved visible.
   const memberRows = await prisma.member.findMany({
     where: { organizationId, id: { in: idList } },
     select: { id: true, firstName: true, lastName: true, memberCode: true },
@@ -413,8 +495,15 @@ async function loadFinancialAggregation(args: BuildExportArgs): Promise<{
     memberCodes.set(m.id, m.memberCode)
   }
 
+  // Branch-scoped exactly like `paymentFilter` above, so a member's other
+  // branches' plans and prices never enter the financial summary.
   const memberships = (await prisma.membership.findMany({
-    where: { organizationId, memberId: { in: idList } },
+    where: {
+      organizationId,
+      memberId: { in: idList },
+      // Membership.branchId is NOT NULL -> REQUIRED builder.
+      ...branchFilterWhereRequired(branchFilter),
+    },
     select: {
       id: true,
       memberId: true,

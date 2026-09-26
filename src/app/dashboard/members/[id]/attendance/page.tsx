@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilter, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 import { dayKeyInTimeZone } from "@/lib/memberships"
 import {
   ATTENDANCE_RANGE_PRESETS,
@@ -36,9 +38,11 @@ export default async function MemberAttendanceRoute({
   const { id } = await params
   const user = await requireUser()
   if (!can(user, "attendance:view")) notFound()
+  await requireBranchAccess()
+  const memberBranchClause = branchFilterWhere(await getBranchFilter(), "homeBranchId")
 
   const member = await prisma.member.findFirst({
-    where: { id, organizationId: user.organizationId, deletedAt: null },
+    where: { id, organizationId: user.organizationId, deletedAt: null, ...memberBranchClause },
     select: { id: true },
   })
   if (!member) notFound()
@@ -53,6 +57,7 @@ export default async function MemberAttendanceRoute({
           status: "ACTIVE",
           deletedAt: null,
           id: { not: member.id },
+          ...memberBranchClause,
         },
         select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
         orderBy: { firstName: "asc" },
@@ -71,7 +76,8 @@ export default async function MemberAttendanceRoute({
     timeZone,
     range,
     page,
-    PAGE_SIZE
+    PAGE_SIZE,
+    await getBranchFilter()
   )
   if (!view) notFound()
 

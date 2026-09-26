@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
 import { dayKeyOf } from "@/lib/format"
+import { getBranchFilterForRequest } from "@/lib/branches"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
 
 import { AttendancePage } from "@/components/attendance/attendance-page"
 
@@ -12,7 +14,12 @@ export const metadata: Metadata = {
   title: "Attendance",
 }
 
-type SearchParams = Promise<{ date?: string; page?: string }>
+type SearchParams = Promise<{
+  date?: string
+  page?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
+}>
 
 export default async function AttendanceRoute({
   searchParams,
@@ -31,12 +38,17 @@ export default async function AttendanceRoute({
   const pageSize = 100
   const skip = (page - 1) * pageSize
 
-  const [checkins, totalCount, activeQrSessions, members, locations, pendingRequests] =
+  const filter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhereRequired(filter)
+  const memberBranchClause = branchFilterWhere(filter, "homeBranchId")
+
+  const [checkins, totalCount, activeQrSessions, members, branches, pendingRequests] =
     await Promise.all([
       prisma.checkIn.findMany({
         where: {
           organizationId: user.organizationId,
           dayKey: todayKey,
+          ...branchClause,
         },
         include: {
           member: {
@@ -51,6 +63,7 @@ export default async function AttendanceRoute({
         where: {
           organizationId: user.organizationId,
           dayKey: todayKey,
+          ...branchClause,
         },
       }),
       prisma.qRSession.findMany({
@@ -58,9 +71,10 @@ export default async function AttendanceRoute({
           organizationId: user.organizationId,
           revokedAt: null,
           expiresAt: { gt: new Date() },
+          ...branchClause,
         },
         include: {
-          location: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -69,12 +83,13 @@ export default async function AttendanceRoute({
           organizationId: user.organizationId,
           status: "ACTIVE",
           deletedAt: null,
+          ...memberBranchClause,
         },
         select: { id: true, firstName: true, lastName: true, memberCode: true, phone: true },
         orderBy: { firstName: "asc" },
       }),
-      prisma.gymLocation.findMany({
-        where: { organizationId: user.organizationId },
+      prisma.branch.findMany({
+        where: { organizationId: user.organizationId, status: "ACTIVE" },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
@@ -82,6 +97,7 @@ export default async function AttendanceRoute({
         where: {
           organizationId: user.organizationId,
           status: "PENDING",
+          ...branchClause,
         },
       }),
     ])
@@ -97,7 +113,7 @@ export default async function AttendanceRoute({
   const serializedSessions = activeQrSessions.map((s) => ({
     id: s.id,
     label: s.label,
-    locationName: s.location.name,
+    branchName: s.branch.name,
     expiresAt: s.expiresAt.toISOString(),
   }))
 
@@ -113,7 +129,7 @@ export default async function AttendanceRoute({
       todayKey={todayKey}
       activeQrSessions={serializedSessions}
       members={members}
-      locations={locations}
+      branches={branches}
       canRecord={can(user, "attendance:record")}
       pendingRequests={pendingRequests}
     />

@@ -3,6 +3,7 @@ import "server-only"
 import { cache } from "react"
 
 import { prisma } from "@/lib/prisma"
+import { branchFilterWhereRequired, type BranchFilter } from "@/lib/branch-scope"
 import {
   getMembershipLifecycle,
   LIFECYCLE_STATUS_ORDER,
@@ -34,17 +35,25 @@ function zeroCounts(): MembershipLifecycleCounts {
  * members by the state of their primary/current membership. Renewals are
  * membership records, so a member who renewed twice contributes 3 to
  * `records` but 1 to `members`. Cached per request (React cache).
+ *
+ * `branchFilter` narrows the scan to the caller's branch scope (plus org-wide
+ * records). It is optional so an org-wide caller keeps working; an omitted
+ * filter means "all", never "none".
  */
 export const getMembershipLifecycleStats = cache(
   async (
     organizationId: string,
-    timeZone: string
+    timeZone: string,
+    branchFilter?: BranchFilter
   ): Promise<{
     records: MembershipLifecycleCounts
     members: MembershipLifecycleCounts
   }> => {
     const rows = await prisma.membership.findMany({
-      where: { organizationId },
+      where: {
+        organizationId,
+        ...branchFilterWhereRequired(branchFilter ?? { kind: "all" }),
+      },
       select: {
         id: true,
         memberId: true,

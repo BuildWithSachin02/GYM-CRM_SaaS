@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   Banknote,
   BarChart3,
+  Building2,
   CalendarDays,
   CheckSquare,
   ClipboardCheck,
@@ -22,47 +23,45 @@ import {
 
 import { cn } from "@/lib/utils"
 import { activeNavItemHref } from "@/lib/navigation"
+import { visibleNavItems } from "@/lib/nav-items"
 import { can, type Permission } from "@/lib/permissions"
 import type { SessionUser } from "@/lib/auth/auth"
 import type { SidebarCounts } from "@/lib/domain/counts"
 
-type NavItem = {
-  label: string
-  href: string
-  icon: LucideIcon
-  permission: Permission
-  countKey?: keyof SidebarCounts
+/**
+ * Icons are the only reason this stays a component: the ORDER, LABELS and
+ * PERMISSION gating live in the pure `@/lib/nav-items` module so they can be
+ * asserted in a unit test. The desktop sidebar and the mobile sheet both render
+ * this component, so there is a single navigation source for both.
+ */
+const NAV_ICONS: Record<string, LucideIcon> = {
+  "/dashboard": LayoutDashboard,
+  "/dashboard/branches": Building2,
+  "/dashboard/members": Users,
+  "/dashboard/memberships": UserCheck,
+  "/dashboard/plans": FileText,
+  "/dashboard/payments": Banknote,
+  "/dashboard/attendance": ScanLine,
+  "/dashboard/attendance/qr": ClipboardCheck,
+  "/dashboard/leads": TrendingUp,
+  "/dashboard/trainers": Dumbbell,
+  "/dashboard/appointments": CalendarDays,
+  "/dashboard/tasks": CheckSquare,
+  "/dashboard/reports": BarChart3,
+  "/dashboard/settings/users": ShieldCheck,
+  "/dashboard/settings": Settings,
 }
-
-const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard:view" },
-  { label: "Members", href: "/dashboard/members", icon: Users, permission: "members:view", countKey: "members" },
-  { label: "Memberships", href: "/dashboard/memberships", icon: UserCheck, permission: "memberships:view", countKey: "memberships" },
-  { label: "Plans", href: "/dashboard/plans", icon: FileText, permission: "plans:view", countKey: "plans" },
-  { label: "Payments", href: "/dashboard/payments", icon: Banknote, permission: "payments:view", countKey: "payments" },
-  { label: "Attendance", href: "/dashboard/attendance", icon: ScanLine, permission: "attendance:view", countKey: "attendance" },
-  { label: "QR Check-in", href: "/dashboard/attendance/qr", icon: ClipboardCheck, permission: "attendance:record" },
-  { label: "Leads", href: "/dashboard/leads", icon: TrendingUp, permission: "leads:view", countKey: "leads" },
-  { label: "Trainers", href: "/dashboard/trainers", icon: Dumbbell, permission: "trainers:view", countKey: "trainers" },
-  { label: "Appointments", href: "/dashboard/appointments", icon: CalendarDays, permission: "appointments:view", countKey: "appointments" },
-  { label: "Tasks", href: "/dashboard/tasks", icon: CheckSquare, permission: "tasks:view", countKey: "tasks" },
-  { label: "Reports", href: "/dashboard/reports", icon: BarChart3, permission: "reports:view" },
-  { label: "Users & Access", href: "/dashboard/settings/users", icon: ShieldCheck, permission: "staff:manage" },
-  // Settings is ALWAYS the final navigation item — it must never appear before
-  // any module (Users & Access sits directly above it when authorized).
-  { label: "Settings", href: "/dashboard/settings", icon: Settings, permission: "settings:view" },
-]
 
 export function SidebarNav({ user, counts }: { user: SessionUser; counts?: SidebarCounts }) {
   const pathname = usePathname()
-  const items = NAV_ITEMS.filter((item) => can(user, item.permission))
+  const items = visibleNavItems((permission: Permission) => can(user, permission))
   const activeHref = activeNavItemHref(items, pathname)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
       {items.map((item) => {
         const active = item.href === activeHref
-        const Icon = item.icon
+        const Icon = NAV_ICONS[item.href] ?? LayoutDashboard
         const count = item.countKey && counts ? counts[item.countKey] : undefined
         return (
           <Link

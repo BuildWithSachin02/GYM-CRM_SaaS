@@ -9,42 +9,18 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { SidebarBrand } from "@/components/shell/sidebar-nav"
 import { UserMenu } from "@/components/shell/topbar"
 import { ThemeToggle } from "@/components/shell/theme-toggle"
+import { navTitleForPath } from "@/lib/nav-items"
 import type { SessionUser } from "@/lib/auth/auth"
-
-const TITLES: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/dashboard/members": "Members",
-  "/dashboard/plans": "Membership Plans",
-  "/dashboard/memberships": "Memberships",
-  "/dashboard/payments": "Payments",
-  "/dashboard/attendance": "Attendance",
-  "/dashboard/attendance/qr": "QR Check-in",
-  "/dashboard/leads": "Leads",
-  "/dashboard/trainers": "Trainers",
-  "/dashboard/appointments": "Appointments",
-  "/dashboard/tasks": "Tasks",
-  "/dashboard/notifications": "Notifications",
-  "/dashboard/reports": "Reports",
-  "/dashboard/settings": "Settings",
-  "/dashboard/settings/users": "Users & Access",
-}
-
-function titleForPath(pathname: string): string {
-  if (TITLES[pathname]) return TITLES[pathname]
-  if (pathname.startsWith("/dashboard/members/")) return "Member Profile"
-  if (pathname.startsWith("/dashboard/leads/")) return "Lead Profile"
-  if (pathname.startsWith("/dashboard/trainers/")) return "Trainer Profile"
-  return "Dashboard"
-}
 
 type ShellProps = {
   user: SessionUser
   sidebarNav: React.ReactNode
   topbarActions: React.ReactNode
+  branchSwitcher?: React.ReactNode
   children: React.ReactNode
 }
 
-export function Shell({ user, sidebarNav, topbarActions, children }: ShellProps) {
+export function Shell({ user, sidebarNav, topbarActions, branchSwitcher, children }: ShellProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -96,7 +72,13 @@ export function Shell({ user, sidebarNav, topbarActions, children }: ShellProps)
                 {user.organization.name}
               </span>
               <span className="hidden text-muted-foreground sm:inline">/</span>
-              <h1 className="font-semibold tracking-tight">{titleForPath(pathname)}</h1>
+              {branchSwitcher && (
+                <>
+                  {branchSwitcher}
+                  <span className="hidden text-muted-foreground sm:inline">/</span>
+                </>
+              )}
+              <h1 className="font-semibold tracking-tight">{navTitleForPath(pathname)}</h1>
             </div>
           </div>
 

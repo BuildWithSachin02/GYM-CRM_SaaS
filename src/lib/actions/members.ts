@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma"
 import { requireUserOrThrow, type SessionUser } from "@/lib/auth/auth"
 import { memberSchema, type MemberInput } from "@/lib/validators"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
+import { resolveWriteBranch } from "@/lib/branches"
 import { can } from "@/lib/permissions"
 import {
   classifyDuplicates,
@@ -83,6 +84,24 @@ export async function createMember(input: MemberInput): Promise<MemberActionResu
 
   const data = parsed.data
 
+  // Home branch: an explicitly chosen branch is validated against the actor's
+  // authority; otherwise the member defaults to the actor's write branch.
+  let homeBranchId: string | null
+  if (data.homeBranchId) {
+    const resolvedHome = await resolveWriteBranch(data.homeBranchId)
+    if (!resolvedHome.ok) {
+      return {
+        success: false,
+        error: resolvedHome.error,
+        fieldErrors: { homeBranchId: [resolvedHome.error] },
+      }
+    }
+    homeBranchId = resolvedHome.branchId
+  } else {
+    const resolvedDefault = await resolveWriteBranch()
+    homeBranchId = resolvedDefault.ok ? resolvedDefault.branchId : null
+  }
+
   // Informational duplicate detection (never blocks): a STRONG match is
   // same normalized name + same phone; a WEAK match is same name only.
   // Different names sharing a phone is explicitly allowed.
@@ -101,6 +120,7 @@ export async function createMember(input: MemberInput): Promise<MemberActionResu
     emergencyContactName: data.emergencyContactName ?? null,
     emergencyContactPhone: data.emergencyContactPhone ?? null,
     trainerId: data.trainerId ?? null,
+    homeBranchId,
     signupSource: (data.signupSource as "WEBSITE" | "INSTAGRAM" | "FACEBOOK" | "WHATSAPP" | "GOOGLE" | "WALK_IN" | "MANUAL") ?? null,
     notes: data.notes ?? null,
     status: "ACTIVE" as const,
@@ -205,6 +225,24 @@ export async function updateMember(
   )
   const warnings = classifyDuplicates(data, candidates)
 
+  // Home branch: only when a value is actually sent (absent = keep unchanged).
+  let nextHomeBranchId: string | null | undefined
+  if (data.homeBranchId !== undefined) {
+    if (data.homeBranchId) {
+      const resolvedHome = await resolveWriteBranch(data.homeBranchId)
+      if (!resolvedHome.ok) {
+        return {
+          success: false,
+          error: resolvedHome.error,
+          fieldErrors: { homeBranchId: [resolvedHome.error] },
+        }
+      }
+      nextHomeBranchId = resolvedHome.branchId
+    } else {
+      nextHomeBranchId = null
+    }
+  }
+
   const updated = await prisma.member.update({
     where: { id: memberId },
     data: {
@@ -218,6 +256,7 @@ export async function updateMember(
       emergencyContactName: data.emergencyContactName ?? null,
       emergencyContactPhone: data.emergencyContactPhone ?? null,
       trainerId: data.trainerId ?? null,
+      ...(nextHomeBranchId !== undefined ? { homeBranchId: nextHomeBranchId } : {}),
       signupSource: (data.signupSource as "WEBSITE" | "INSTAGRAM" | "FACEBOOK" | "WHATSAPP" | "GOOGLE" | "WALK_IN" | "MANUAL") ?? null,
       notes: data.notes ?? null,
     },

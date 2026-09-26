@@ -54,6 +54,7 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
       organizationId: true,
       status: true,
       amountMinor: true,
+      branchId: true,
     },
   })
 
@@ -92,6 +93,8 @@ export async function recordPayment(input: PaymentInput): Promise<PaymentActionR
         organizationId: user.organizationId,
         memberId: data.memberId,
         membershipId: link.membershipId,
+        // A payment is stamped with the branch of the membership it settles.
+        branchId: membership!.branchId,
         amountMinor: data.amountMinor,
         method: data.method,
         paymentDate: data.paymentDate,

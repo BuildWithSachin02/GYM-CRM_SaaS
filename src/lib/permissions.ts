@@ -42,6 +42,14 @@ export type Permission =
   // Attendance (manual + QR)
   | "attendance:view"
   | "attendance:record"
+  // Branches (branch management module — a first-class CRM module, NOT part of
+  // Settings). These answer WHAT a user may do with branch records. WHICH
+  // branches they may act in stays the separate UserBranch scope.
+  | "branches:view"
+  | "branches:create"
+  | "branches:edit"
+  | "branches:deactivate"
+  | "branches:manage"
   // Leads / CRM
   | "leads:view"
   | "leads:create"
@@ -82,6 +90,11 @@ export const PERMISSION_VALUES = [
   "payments:record",
   "attendance:view",
   "attendance:record",
+  "branches:view",
+  "branches:create",
+  "branches:edit",
+  "branches:deactivate",
+  "branches:manage",
   "leads:view",
   "leads:create",
   "leads:update",
@@ -127,6 +140,11 @@ export function permissionLabel(permission: Permission): string {
     "payments:record": "Record Payments",
     "attendance:view": "View Attendance",
     "attendance:record": "Record Attendance",
+    "branches:view": "View Branches",
+    "branches:create": "Add Branches",
+    "branches:edit": "Edit Branches",
+    "branches:deactivate": "Activate/Deactivate Branches",
+    "branches:manage": "Manage Branch Staff Access",
     "leads:view": "View Leads",
     "leads:create": "Add Leads",
     "leads:update": "Edit Leads",
@@ -220,6 +238,17 @@ export const PERMISSION_MATRIX: PermissionMatrixEntry[] = [
     permissions: [{ permission: "attendance:record", action: "Use" }],
   },
   {
+    module: "Branches",
+    description: "Gym locations: branch list, quick overview and branch staff access.",
+    permissions: [
+      { permission: "branches:view", action: "View" },
+      { permission: "branches:create", action: "Add" },
+      { permission: "branches:edit", action: "Edit" },
+      { permission: "branches:deactivate", action: "Activate" },
+      { permission: "branches:manage", action: "Manage staff", sensitive: true },
+    ],
+  },
+  {
     module: "Leads",
     description: "Lead pipeline, activities and conversion.",
     permissions: [
@@ -303,6 +332,11 @@ const ROLE_PERMISSIONS: Record<UserRoleValue, Permission[]> = {
     "payments:record",
     "attendance:view",
     "attendance:record",
+    "branches:view",
+    "branches:create",
+    "branches:edit",
+    "branches:deactivate",
+    "branches:manage",
     "leads:view",
     "leads:create",
     "leads:update",
@@ -335,6 +369,11 @@ const ROLE_PERMISSIONS: Record<UserRoleValue, Permission[]> = {
     "payments:record",
     "attendance:view",
     "attendance:record",
+    "branches:view",
+    "branches:create",
+    "branches:edit",
+    "branches:deactivate",
+    "branches:manage",
     "leads:view",
     "leads:create",
     "leads:update",
@@ -364,6 +403,10 @@ const ROLE_PERMISSIONS: Record<UserRoleValue, Permission[]> = {
     "payments:record",
     "attendance:view",
     "attendance:record",
+    // Receptionists may READ the branch directory (they need to know which
+    // location they operate at) but can never create, edit, deactivate a branch
+    // or change staff access.
+    "branches:view",
     "leads:view",
     "leads:create",
     "leads:update",

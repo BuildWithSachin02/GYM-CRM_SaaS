@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 
 import { MemberList } from "@/components/members/member-list"
 
@@ -15,6 +17,8 @@ type SearchParams = Promise<{
   q?: string
   status?: string
   page?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 export default async function MembersPage({
@@ -24,7 +28,10 @@ export default async function MembersPage({
 }) {
   const user = await requireUser()
   if (!can(user, "members:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const q = params.q?.trim() || ""
   const statusFilter = params.status?.trim() || ""
@@ -37,14 +44,26 @@ export default async function MembersPage({
     deletedAt: null,
   }
 
+  // The search box and the branch scope both constrain the SAME rows, so they
+  // share ONE `OR` array: a second `OR` key would silently overwrite the first.
+  // An org-wide reader (kind "all") contributes no arms, so the search OR stays
+  // exactly as it was.
+  const orArms: Array<Record<string, unknown>> = []
+
   if (q) {
-    where.OR = [
+    orArms.push(
       { firstName: { contains: q, mode: "insensitive" } },
       { lastName: { contains: q, mode: "insensitive" } },
       { memberCode: { contains: q, mode: "insensitive" } },
       { phone: { contains: q, mode: "insensitive" } },
-      { email: { contains: q, mode: "insensitive" } },
-    ]
+      { email: { contains: q, mode: "insensitive" } }
+    )
+  }
+
+  orArms.push(...(memberBranchClause.OR ?? []))
+
+  if (orArms.length > 0) {
+    where.OR = orArms
   }
 
   if (statusFilter && ["ACTIVE", "INACTIVE", "ARCHIVED"].includes(statusFilter)) {

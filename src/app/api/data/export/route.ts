@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 
 import { requireUserOrThrow, type SessionUser } from "@/lib/auth/auth"
 import { can } from "@/lib/permissions"
+import { getBranchFilter } from "@/lib/branches"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { dataExportSchema } from "@/lib/validators"
 import { buildExportWorkbook } from "@/lib/services/data-export"
@@ -14,7 +15,8 @@ export const dynamic = "force-dynamic"
  * A Route Handler (not a server action) so the response is a real file
  * download the browser can save directly, without server-action body-size
  * limits. Auth + permission are re-checked here server-side; the workbook is
- * scoped entirely to user.organizationId from the session.
+ * scoped entirely to user.organizationId from the session and then narrowed to
+ * the requester's branch scope (a fail-closed scope exports nothing).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let user: SessionUser
@@ -40,6 +42,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { categories, dateRange } = parsed.data
+  const branchFilter = await getBranchFilter()
 
   try {
     const { buffer, filename } = await buildExportWorkbook({
@@ -48,6 +51,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       categories,
       range: dateRange,
       timeZone: user.organization.timezone,
+      branchFilter,
     })
 
     await writeAudit({

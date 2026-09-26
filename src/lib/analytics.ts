@@ -1,6 +1,7 @@
 import "server-only"
 
 import { prisma } from "@/lib/prisma"
+import { branchFilterWhereRequired, type BranchFilter } from "@/lib/branch-scope"
 import { dayKeyInTimeZone } from "@/lib/memberships"
 import {
   attributeMinorByDay,
@@ -29,11 +30,16 @@ export * from "@/lib/analytics-core"
  * Revenue is always `Payment.amountMinor` (integer paise) for `status =
  * RECORDED` only (VOIDED payments never count), attributed to the business
  * day in the organization timezone.
+ *
+ * `branchFilter` (optional; omitted = org-wide) narrows the payments — and the
+ * membership plan-name lookup that follows — to the caller's branch scope plus
+ * organization-wide records. A fail-closed filter matches nothing.
  */
 export async function getRevenueAnalysis(
   organizationId: string,
   timeZone: string,
-  range: number | DayKeyRange
+  range: number | DayKeyRange,
+  branchFilter?: BranchFilter
 ): Promise<{
   todayKey: string
   keys: string[]
@@ -50,12 +56,14 @@ export async function getRevenueAnalysis(
       : rangeKeysBetween(range.fromKey, range.toKey)
   const keySet = new Set(keys)
   const { gte, lte } = revenueEnvelope(keys)
+  const branchWhere = branchFilterWhereRequired(branchFilter ?? { kind: "all" })
 
   const fetched = await prisma.payment.findMany({
     where: {
       organizationId,
       status: "RECORDED",
       paymentDate: { gte, lte },
+      ...branchWhere,
     },
     select: {
       id: true,
@@ -90,7 +98,7 @@ export async function getRevenueAnalysis(
   const planNameById = new Map<string, string>()
   if (membershipIds.size > 0) {
     const memberships = await prisma.membership.findMany({
-      where: { id: { in: Array.from(membershipIds) }, organizationId },
+      where: { id: { in: Array.from(membershipIds) }, organizationId, ...branchWhere },
       select: { id: true, plan: { select: { name: true } } },
     })
     for (const m of memberships) planNameById.set(m.id, m.plan.name)
@@ -121,11 +129,17 @@ export async function getRevenueAnalysis(
   }
 }
 
-/** Attendance trend in org-timezone days: `days` calendar-day buckets ending today, or an explicit inclusive day-key range. */
+/**
+ * Attendance trend in org-timezone days: `days` calendar-day buckets ending
+ * today, or an explicit inclusive day-key range. `branchFilter` (optional;
+ * omitted = org-wide) narrows the check-ins to the caller's branch scope plus
+ * organization-wide records.
+ */
 export async function getAttendanceTrendByDay(
   organizationId: string,
   timeZone: string,
-  range: number | DayKeyRange
+  range: number | DayKeyRange,
+  branchFilter?: BranchFilter
 ): Promise<TrendPoint[]> {
   const todayKey = dayKeyInTimeZone(new Date(), timeZone)
   const keys =
@@ -134,7 +148,11 @@ export async function getAttendanceTrendByDay(
       : rangeKeysBetween(range.fromKey, range.toKey)
   const rows = await prisma.checkIn.groupBy({
     by: ["dayKey"],
-    where: { organizationId, dayKey: { in: keys } },
+    where: {
+      organizationId,
+      dayKey: { in: keys },
+      ...branchFilterWhereRequired(branchFilter ?? { kind: "all" }),
+    },
     _count: { _all: true },
   })
   const byDay = new Map(rows.map((r) => [r.dayKey, r._count._all]))

@@ -5,7 +5,7 @@
  * while PRESERVING:
  *   - The Organization
  *   - All Users (authentication accounts)
- *   - GymLocation records
+ *   - Branch records (a branch is configuration, never business data)
  *   - Trainer records
  *
  * Safe to run multiple times (idempotent).
@@ -17,7 +17,7 @@ const prisma = new PrismaClient()
 
 async function main() {
   console.log("Starting safe demo-data cleanup...")
-  console.log("Preserving: Organization, Users, Locations, Trainers")
+  console.log("Preserving: Organization, Users, Branches, Trainers")
   console.log("")
 
   const org = await prisma.organization.findFirst()

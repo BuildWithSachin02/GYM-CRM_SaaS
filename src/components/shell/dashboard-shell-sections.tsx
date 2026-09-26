@@ -2,6 +2,7 @@ import { Bell } from "lucide-react"
 
 import { prisma } from "@/lib/prisma"
 import type { SessionUser } from "@/lib/auth/auth"
+import { getBranchAccess, getBranchFilter } from "@/lib/branches"
 import { getSidebarCounts } from "@/lib/domain/counts"
 
 import { NotificationsMenu } from "@/components/shell/topbar"
@@ -11,11 +12,22 @@ import { Button } from "@/components/ui/button"
 /**
  * Streamed sidebar navigation including live count badges.
  * Rendered inside React `<Suspense>` so the shell can paint before counts resolve.
+ *
+ * Counts are org + BRANCH scoped. A restricted user with zero branch
+ * assignments is fail-closed: the nav renders with no badges at all rather than
+ * org-derived zeros, and `getSidebarCounts` refuses to run for that mode anyway.
  */
 export async function SidebarNavWithCounts({ user }: { user: SessionUser }) {
+  const access = await getBranchAccess()
+  if (access.mode === "none") {
+    return <SidebarNav user={user} />
+  }
+
+  const branchFilter = await getBranchFilter()
   const counts = await getSidebarCounts(
     user.organizationId,
-    user.organization.timezone
+    user.organization.timezone,
+    branchFilter
   )
   return <SidebarNav user={user} counts={counts} />
 }

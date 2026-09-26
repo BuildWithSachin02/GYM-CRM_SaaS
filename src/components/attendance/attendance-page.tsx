@@ -32,7 +32,7 @@ type SerializedCheckin = {
 type SerializedQrSession = {
   id: string
   label: string | null
-  locationName: string
+  branchName: string
   expiresAt: string
 }
 
@@ -43,7 +43,7 @@ type Member = {
   memberCode?: string | null
   phone?: string | null
 }
-type Location = { id: string; name: string }
+type Branch = { id: string; name: string }
 
 type AttendancePageProps = {
   checkins: SerializedCheckin[]
@@ -53,7 +53,7 @@ type AttendancePageProps = {
   todayKey: string
   activeQrSessions: SerializedQrSession[]
   members: Member[]
-  locations: Location[]
+  branches: Branch[]
   canRecord: boolean
   pendingRequests?: number
 }
@@ -66,7 +66,7 @@ export function AttendancePage({
   todayKey,
   activeQrSessions,
   members,
-  locations,
+  branches,
   canRecord,
   pendingRequests = 0,
 }: AttendancePageProps) {
@@ -207,7 +207,7 @@ export function AttendancePage({
       {showQrSection && (
         <QrManager
           activeQrSessions={activeQrSessions}
-          locations={locations}
+          branches={branches}
         />
       )}
     </div>

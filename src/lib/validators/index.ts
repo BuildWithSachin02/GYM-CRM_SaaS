@@ -87,6 +87,7 @@ export const memberSchema = z.object({
   emergencyContactName: optionalText(80),
   emergencyContactPhone: optionalPhone(),
   trainerId: z.string().uuid().optional().nullable(),
+  homeBranchId: z.string().uuid("Invalid branch").optional().nullable(),
   signupSource: z.enum(["WEBSITE", "INSTAGRAM", "FACEBOOK", "WHATSAPP", "GOOGLE", "WALK_IN", "MANUAL"] as const).optional().nullable(),
   notes: optionalText(1000),
 })
@@ -164,7 +165,7 @@ export type PaymentInput = z.input<typeof paymentSchema>
 
 export const manualCheckinSchema = z.object({
   memberId: z.string().uuid("Invalid member"),
-  locationId: z.string().uuid("Invalid location").optional().nullable(),
+  branchId: z.string().uuid("Invalid branch").optional().nullable(),
 })
 
 export type ManualCheckinInput = z.infer<typeof manualCheckinSchema>
@@ -223,7 +224,7 @@ export const appointmentSchema = z.object({
   endsAt: requiredDateTime(),
   status: z.enum(["SCHEDULED", "COMPLETED", "CANCELLED", "NO_SHOW"] as const),
   notes: optionalText(500),
-  locationId: z.string().uuid().optional().nullable(),
+  branchId: z.string().uuid().optional().nullable(),
 }).refine((v) => (v.memberId ?? null) !== null || (v.leadId ?? null) !== null, {
   message: "Appointment must be linked to a member or a lead",
 }).refine((v) => v.endsAt > v.startsAt, {
@@ -372,6 +373,44 @@ export type TrainerInput = z.infer<typeof trainerSchema>
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Branch create. The branch code is NOT an input: it is generated server-side,
+ * organization-scoped and permanent (see `@/lib/branch-code`). The address
+ * fields match the columns already on Branch, so the Branches form can capture
+ * a full location without a schema change.
+ */
+export const branchSchema = z.object({
+  name: requiredText(1, 120),
+  phone: optionalPhone(),
+  email: optionalEmail(),
+  address: optionalText(300),
+  city: optionalText(80),
+  state: optionalText(80),
+  country: optionalText(80),
+})
+
+export type BranchInput = z.input<typeof branchSchema>
+
+/**
+ * Branch update. The branch code is deliberately read-only here — codes are
+ * auto-generated, permanent and never recycled, so edits go through
+ * deactivation/recreation instead of silent re-labelling.
+ */
+export const branchUpdateSchema = z.object({
+  branchId: z.string().uuid("Invalid branch"),
+  name: requiredText(1, 120),
+  phone: optionalPhone(),
+  email: optionalEmail(),
+  address: optionalText(300),
+  city: optionalText(80),
+  state: optionalText(80),
+  country: optionalText(80),
+})
+
+export type BranchUpdateInput = z.input<typeof branchUpdateSchema>
+
+// ---------------------------------------------------------------------------
+
 export const orgSettingsSchema = z.object({
   name: requiredText(1, 120),
   phone: optionalPhone(),
@@ -388,7 +427,7 @@ export type OrgSettingsInput = z.infer<typeof orgSettingsSchema>
 // ---------------------------------------------------------------------------
 
 export const qrSessionSchema = z.object({
-  locationId: z.string().uuid("Invalid location"),
+  branchId: z.string().uuid("Invalid branch"),
   label: optionalText(120),
   expiresInMinutes: z.number().int().min(1).max(1440).default(60),
 })

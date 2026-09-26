@@ -34,35 +34,35 @@ import { QrDisplay } from "@/components/attendance/qr-display"
 type SerializedQrSession = {
   id: string
   label: string | null
-  locationName: string
+  branchName: string
   expiresAt: string
 }
 
-type Location = { id: string; name: string }
+type Branch = { id: string; name: string }
 
 type QrManagerProps = {
   activeQrSessions: SerializedQrSession[]
-  locations: Location[]
+  branches: Branch[]
 }
 
 const generateQrSchema = z.object({
-  locationId: z.string().uuid("Please select a location"),
+  branchId: z.string().uuid("Please select a branch"),
   label: z.string().max(120).optional().nullable(),
   expiresInMinutes: z.number().int().min(1).max(1440).default(60),
 })
 
-export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
+export function QrManager({ activeQrSessions, branches }: QrManagerProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
 
   const [label, setLabel] = useState("")
-  const [locationId, setLocationId] = useState("")
+  const [branchId, setBranchId] = useState("")
   const [expiresInMinutes, setExpiresInMinutes] = useState("60")
 
   function handleGenerate() {
     const parsed = generateQrSchema.safeParse({
-      locationId,
+      branchId,
       label: label || null,
       expiresInMinutes: parseInt(expiresInMinutes, 10) || 60,
     })
@@ -75,7 +75,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
 
     startTransition(async () => {
       const result = await createQrSession({
-        locationId: parsed.data.locationId,
+        branchId: parsed.data.branchId,
         label: parsed.data.label ?? null,
         expiresInMinutes: parsed.data.expiresInMinutes,
       })
@@ -84,7 +84,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
         toast.success("QR session created")
         setGeneratedToken(result.token)
         setLabel("")
-        setLocationId("")
+        setBranchId("")
         setExpiresInMinutes("60")
         router.refresh()
       } else {
@@ -125,7 +125,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
                 <TableRow>
                   <TableHead className="w-10 text-muted-foreground">#</TableHead>
                   <TableHead>Label</TableHead>
-                  <TableHead>Location</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead className="w-24" />
                 </TableRow>
@@ -139,7 +139,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
                     <TableCell className="font-medium">
                       {s.label ?? "—"}
                     </TableCell>
-                    <TableCell>{s.locationName}</TableCell>
+                    <TableCell>{s.branchName}</TableCell>
                     <TableCell>
                       <StatusBadge tone="warning">
                         {formatDateTime(s.expiresAt)}
@@ -170,13 +170,13 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="qr-location">Location</Label>
+              <Label htmlFor="qr-location">Branch</Label>
               <EntityCombobox
-                value={locationId}
-                onValueChange={setLocationId}
-                options={locations.map((loc) => ({ id: loc.id, label: loc.name }))}
-                placeholder="Search or select location"
-                emptyText="No locations found."
+                value={branchId}
+                onValueChange={setBranchId}
+                options={branches.map((b) => ({ id: b.id, label: b.name }))}
+                placeholder="Search or select branch"
+                emptyText="No branches found."
               />
             </div>
             <div className="space-y-1.5">
@@ -203,7 +203,7 @@ export function QrManager({ activeQrSessions, locations }: QrManagerProps) {
           <div className="mt-4">
             <Button
               onClick={handleGenerate}
-              disabled={isPending || !locationId}
+              disabled={isPending || !branchId}
             >
               <PlusCircle className="size-4" />{" "}
               {isPending ? "Generating..." : "Generate QR"}

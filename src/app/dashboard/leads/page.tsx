@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 
 import { LeadList } from "@/components/leads/lead-list"
 
@@ -15,6 +17,8 @@ type SearchParams = Promise<{
   q?: string
   stage?: string
   page?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 const VALID_STAGES = [
@@ -33,7 +37,10 @@ export default async function LeadsPage({
 }) {
   const user = await requireUser()
   if (!can(user, "leads:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhere(branchFilter)
 
   const q = params.q?.trim() || ""
   const stageFilter = params.stage?.trim() || ""
@@ -46,12 +53,22 @@ export default async function LeadsPage({
     deletedAt: null,
   }
 
+  // Search arms and branch arms share ONE `OR` array (a second `OR` key would
+  // overwrite the first). An org-wide reader contributes no branch arms.
+  const orArms: Array<Record<string, unknown>> = []
+
   if (q) {
-    where.OR = [
+    orArms.push(
       { name: { contains: q, mode: "insensitive" } },
       { phone: { contains: q, mode: "insensitive" } },
-      { email: { contains: q, mode: "insensitive" } },
-    ]
+      { email: { contains: q, mode: "insensitive" } }
+    )
+  }
+
+  orArms.push(...(branchClause.OR ?? []))
+
+  if (orArms.length > 0) {
+    where.OR = orArms
   }
 
   if (stageFilter && (VALID_STAGES as readonly string[]).includes(stageFilter)) {

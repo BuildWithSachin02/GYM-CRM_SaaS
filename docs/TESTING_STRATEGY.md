@@ -6,6 +6,7 @@
 - **Server-first.** Most critical tests target server services, authorization, and tenant isolation — not the UI.
 - **All verifications run in CI eventually.** Local verification uses `npm run lint` and `npm run build` (build also type-checks; there is no separate `typecheck` script).
 - No test framework is installed yet; this document specifies the planned approach.
+- **Current state:** a pure-Node unit suite already runs via `npx tsx --test "tests/*.test.ts"` (no framework, no DB required) — branch decision rules, member-attendance math, QR decisions, automation scheduling, validators, workbook/export mapping. `npm run lint` and `npm run build` (build also type-checks) are the pre-merge guards; there is no `typecheck` script.
 - Scope: unit, integration, security, e2e, and automation-engine tests. All integration/DB tests run against the same Prisma/Postgres model.
 
 ## 2. Pyramid
@@ -26,15 +27,18 @@
 ### 3.2 Authorization & tenancy tests
 - Unauthenticated request → denied (fail closed).
 - Role lacking permission → 403, no data returned.
-- Location-scoped role cannot read another location's rows.
+- Branch-restricted user cannot read another branch's rows (org-wide records with null branch remain visible; assigned-branch rows only).
+- Branch access modes: OWNER `all` (no UserBranch rows needed), single assignment (single fallback), multi (switcher + primary fallback), zero assignments (fail-closed, nothing matches).
 - Forging `organization_id` in a request is ignored; server resolves tenant from session.
+- Forged/tampered `gym_branch` cookie is ignored; fallback = requested → primary → first assigned.
 - Out-of-tenant `member_id`, `lead_id`, `payment_id` → indistinguishable 403/404.
 - Deactivated user / revoked session denied on every request.
 
 ### 3.3 QR attendance security tests
 - Static QR never carries a member ID (assert token is opaque/high-entropy).
 - Token stored only as hash; raw token never persisted.
-- Expired token rejected; revoked token rejected; wrong-location rejected.
+- Expired token rejected; revoked token rejected; wrong-branch rejected.
+- Inactive branch rejects session creation and scans (`branch_inactive`).
 - Duplicate scan within window rejected (single check-in).
 - Check-in requires active membership; frozen/member-without-membership rejected.
 

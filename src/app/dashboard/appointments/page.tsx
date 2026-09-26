@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilterForRequest, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere } from "@/lib/branch-scope"
 
 import { AppointmentList } from "@/components/appointments/appointment-list"
 
@@ -14,6 +16,8 @@ export const metadata: Metadata = {
 type SearchParams = Promise<{
   date?: string
   status?: string
+  /** Explicit branch context from a Branches quick link (server-validated). */
+  branch?: string
 }>
 
 const VALID_STATUSES = ["SCHEDULED", "COMPLETED", "CANCELLED", "NO_SHOW"] as const
@@ -31,7 +35,11 @@ export default async function AppointmentsPage({
 }) {
   const user = await requireUser()
   if (!can(user, "appointments:view")) notFound()
+  await requireBranchAccess()
   const params = await searchParams
+  const branchFilter = await getBranchFilterForRequest(params.branch)
+  const branchClause = branchFilterWhere(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const statusFilter = params.status?.trim() || ""
   const dateKey = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? "")
@@ -44,6 +52,7 @@ export default async function AppointmentsPage({
   const where: Record<string, unknown> = {
     organizationId: user.organizationId,
     startsAt: { gte: startOfDay, lte: endOfDay },
+    ...branchClause,
   }
 
   if (statusFilter && (VALID_STATUSES as readonly string[]).includes(statusFilter)) {
@@ -68,15 +77,27 @@ export default async function AppointmentsPage({
       },
     }),
     prisma.member.findMany({
-      where: { organizationId: user.organizationId, deletedAt: null, status: "ACTIVE" },
+      where: {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        status: "ACTIVE",
+        ...memberBranchClause,
+      },
       orderBy: { firstName: "asc" },
       select: { id: true, firstName: true, lastName: true, memberCode: true },
     }),
     prisma.lead.findMany({
-      where: { organizationId: user.organizationId, deletedAt: null, stage: { not: "CONVERTED" } },
+      where: {
+        organizationId: user.organizationId,
+        deletedAt: null,
+        stage: { not: "CONVERTED" },
+        ...branchClause,
+      },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    // Trainers carry NO branchId by design (a trainer works at whichever branch
+    // the member is at), so this picker is org-wide.
     prisma.trainer.findMany({
       where: { organizationId: user.organizationId, active: true },
       orderBy: { user: { name: "asc" } },

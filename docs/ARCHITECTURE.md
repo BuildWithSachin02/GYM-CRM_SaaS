@@ -47,6 +47,8 @@ Cross-cutting: **Authorization middleware**, **tenancy resolver**, **auth contex
 - A tenant key (`organization_id`) is stored on the tenant's own row and on every organization-owned resource.
 - Postgres is shared across tenants (shared schema with per-row tenant key, plus a covering index). This keeps operations simple for the small-to-mid gym market and is compatible with future sharding by organization.
 - The tenant is resolved server-side from the authenticated session. **The client never supplies the tenant directly** for reads/writes; where an ID is supplied it is validated to belong to the session's tenant before use.
+- **Branch** is a location *inside* a tenant, not a second tenant: `Organization → Branch`, and every branch-owned record carries both keys. Branch ids arriving from a cookie, query string or form are treated as preferences and re-authorized on the server; branch is a scoping axis, never an isolation boundary (see `AUTHORIZATION.md` §5.5).
+- The Branches module (`/dashboard/branches`) is a first-class module with dedicated `branches:*` permissions, not a Settings tab.
 
 ### Why not a database per tenant
 For the target market (independent gyms/small chains), shared-schema is the pragmatic default: lower cost, simpler migrations, easy reporting. If a single customer needs hard isolation later, that becomes a provider-level feature; the domain model does not change.
@@ -85,10 +87,11 @@ src/
 1. Client request (Server Action or route handler) → middleware/session extracts authenticated User.
 2. **Tenancy resolver** derives the Organization from the session.
 3. **Authorization** checks the user's role+scope can perform the action.
-4. Input is validated and sanitized.
-5. Service enforces business rules and writes via the tenant-scoped data layer.
-6. Audit events are written for dangerous mutations.
-7. Relevant automation triggers and notification dispatches are enqueued.
+4. **Branch scope resolver** derives WHERE the user may operate (`getBranchAccess()` from session + `gym_branch` cookie, re-validated server-side) and narrows every domain query with a branch filter (`getBranchFilter()` / `getBranchFilterForRequest()` / `branchFilterWhere`). An explicit `?branch=<id>` is re-authorized server-side and fails closed with 404. Branch-attributed metrics use the `exact` filter so no organization-wide row is ever counted on a branch card.
+5. Input is validated and sanitized.
+6. Service enforces business rules and writes via the tenant-scoped data layer.
+7. Audit events are written for dangerous mutations.
+8. Relevant automation triggers and notification dispatches are enqueued.
 
 ## 7. Automation & notifications (architecture)
 
@@ -103,7 +106,8 @@ src/
 Summarized here; full detail in `AUTHORIZATION.md` and `SECURITY.md`.
 
 - Session-based auth with server-held authority.
-- RBAC: Role × Scope (organization / location) → permission set.
+- RBAC: Role × Scope (organization / branch) → permission set; on top of the catalog, `UserBranch` scopes *where* a user may operate (see `AUTHORIZATION.md` §5.5).
+- Branch is never a tenant boundary: data is org-scoped AND branch-filtered, fail-closed when a restricted user has no assignments.
 - Every mutation re-runs authorization.
 - Tenant key always derived server-side.
 - Audit log for security- and money-relevant events.
@@ -125,6 +129,6 @@ Summarized here; full detail in `AUTHORIZATION.md` and `SECURITY.md`.
 
 ## 11. Cross-cutting consistency rules
 
-- All timestamps stored in UTC; rendered in the location's timezone.
+- All timestamps stored in UTC; rendered in the organization's timezone (a Branch has no independent timezone — it inherits `Organization.timezone`).
 - All monetary values stored as integer minor units (e.g. cents) to avoid float errors; display formatted per currency.
 - Tenant-scoped queries must be the default; any code path that could read across tenants requires explicit review.

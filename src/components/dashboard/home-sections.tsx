@@ -20,6 +20,7 @@ import {
   getDashboardUpcomingAppointments,
 } from "@/lib/domain/dashboard"
 import { getOutstandingDuesRows, getOutstandingOverview } from "@/lib/domain/outstanding"
+import { getBranchFilter } from "@/lib/branches"
 import { formatDate, formatDateTime, formatMoney, formatTime, pluralize } from "@/lib/format"
 import { APPOINTMENT_STATUS, LEAD_STAGE, MEMBER_STATUS, PAYMENT_METHOD } from "@/lib/status"
 
@@ -88,6 +89,8 @@ function initialsOf(first: string, last: string) {
 
 /**
  * Streamed segment: the 8 stat cards at the top of the dashboard.
+ * The branch filter is resolved once here and threaded into the server-only
+ * domain loader (this file is a server component — no client DB access).
  */
 export async function HomeStatsSection({
   organizationId,
@@ -96,9 +99,11 @@ export async function HomeStatsSection({
   organizationId: string
   timeZone: string
 }) {
+  const branchFilter = await getBranchFilter()
   const { stats: s, upcomingCount } = await getDashboardStatsData(
     organizationId,
-    timeZone
+    timeZone,
+    branchFilter
   )
 
   return (
@@ -169,9 +174,11 @@ export async function HomeTrendsSection({
   organizationId: string
   timeZone: string
 }) {
+  const branchFilter = await getBranchFilter()
   const { revenueTrend, attendanceTrend } = await getDashboardTrendsData(
     organizationId,
-    timeZone
+    timeZone,
+    branchFilter
   )
 
   return (
@@ -205,8 +212,9 @@ export async function HomeRemainingSection({
   organizationId: string
   timeZone: string
 }) {
+  const branchFilter = await getBranchFilter()
   const { expiringMemberships, todayAppointments, overdueTasks } =
-    await getDashboardRemainingData(organizationId, timeZone)
+    await getDashboardRemainingData(organizationId, timeZone, branchFilter)
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -306,9 +314,10 @@ export async function HomeDuesSection({
   organizationId: string
   timeZone: string
 }) {
+  const branchFilter = await getBranchFilter()
   const [overview, rows] = await Promise.all([
-    getOutstandingOverview(organizationId, timeZone),
-    getOutstandingDuesRows(organizationId, timeZone),
+    getOutstandingOverview(organizationId, timeZone, branchFilter),
+    getOutstandingDuesRows(organizationId, timeZone, branchFilter),
   ])
 
   const overdue = rows.filter((r) => r.status === "OVERDUE").slice(0, 5)
@@ -416,9 +425,10 @@ export async function HomeActivitySection({
 }: {
   organizationId: string
 }) {
+  const branchFilter = await getBranchFilter()
   const [activity, upcomingAppointments] = await Promise.all([
-    getDashboardActivityData(organizationId),
-    getDashboardUpcomingAppointments(organizationId),
+    getDashboardActivityData(organizationId, branchFilter),
+    getDashboardUpcomingAppointments(organizationId, branchFilter),
   ])
   const { recentPayments, recentMembers, newLeadsToday, leadPipeline } = activity
 

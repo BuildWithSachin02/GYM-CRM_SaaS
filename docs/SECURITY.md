@@ -13,6 +13,7 @@
 - **Email + password login.** Passwords hashed with **bcrypt** (`src/lib/auth/password.ts`); plaintext is never stored or logged.
 - **Session cookie** `gym_session`: a stateless **HMAC-SHA256-signed** token (`AUTH_SECRET`) containing `{ userId, exp, v }`, `HttpOnly`, `SameSite=Lax`, 7-day expiry, secure in production, works in both Node and Edge (middleware/proxy) via WebCrypto (`src/lib/auth/session.ts`).
 - Every request re-authenticates: `getCurrentUser` verifies the signature/expiry, then loads the user, re-checks status ACTIVE, compares the cookie's session version `v` to `User.sessionVersion`, and recomputes effective permissions from the DB.
+- **Branch context cookie** `gym_branch`: an `HttpOnly`, `SameSite=Lax`, 365-day cookie holding a branch ID. It is written **only** by the `setBranchContext` server action, which validates the branch is assigned to the user and ACTIVE; OWNER clears it (org-wide access). `getBranchAccess()` re-validates the cookie value against the server-side `UserBranch` rows on every request — a tampered or unassigned branch is silently ignored and a safe fallback (requested → primary → first assigned) is used. Logout deletes both cookies.
 - Login rate limiting / MFA are planned, not yet implemented.
 
 ## 3. Session revocation (sessionVersion)
@@ -51,6 +52,7 @@ Enforced server-side in `src/lib/actions/users.ts` (`findStaffInOrg` + guards):
 - Every org-owned query includes the tenant filter; client-supplied org/role/permission values are ignored or re-validated server-side.
 - Out-of-tenant access attempts return indistinguishable "not found"/"not authorized" errors (no enumeration).
 - The `UserPermission` table is unique per `(organizationId, userId)` and every row is created with the actor's tenant key.
+- **Branch data isolation** (SUB-tenant scope, never a tenant key): every branch-filtered query is org-scoped AND narrowed by `branchFilterWhere`, so a branch-restricted user from org A can only ever see org A rows in their assigned branches. A user with zero assignments is fail-closed (nothing matches; pages call `requireBranchAccess()`). Branch assignment rows (`UserBranch`) are unique per `(organizationId, userId, branchId)` and validated server-side against the org.
 
 ## 7. Application-layer security
 
@@ -86,7 +88,7 @@ See `QR_ATTENDANCE.md`. Guarantees implemented:
 ## 10. Audit logging
 
 - Tenancy-scoped, append-only `AuditLog` rows with actor, action, entity, before/after JSONB, timestamp.
-- Users & Access audit actions: `STAFF_CREATED`, `STAFF_UPDATED`, `USER_DEACTIVATED`, `USER_REACTIVATED`, `USER_ROLE_CHANGED`, `PASSWORD_CHANGED`, `PASSWORD_RESET`, `PERMISSIONS_UPDATED` (with granted/revoked diff). Also login/logout, payments, memberships, leads, QR, trainers, appointments, tasks, settings, data-reset events.
+- Users & Access audit actions: `STAFF_CREATED`, `STAFF_UPDATED`, `USER_DEACTIVATED`, `USER_REACTIVATED`, `USER_ROLE_CHANGED`, `PASSWORD_CHANGED`, `PASSWORD_RESET`, `PERMISSIONS_UPDATED` (with granted/revoked diff). Branch actions: `BRANCH_CREATED`, `BRANCH_UPDATED`, `BRANCH_DEACTIVATED`, `BRANCH_REACTIVATED`, `USER_BRANCH_ASSIGNED`, `USER_BRANCH_REMOVED`. Also login/logout, payments, memberships, leads, QR, trainers, appointments, tasks, settings, data-reset events.
 - The Users & Access **Activity** dialog shows the last 50 events for a user (as entity or actor).
 
 ## 11. Secret and credential management
@@ -103,5 +105,5 @@ See `QR_ATTENDANCE.md`. Guarantees implemented:
 
 ## 13. Testing security requirements
 
-- Pure decision-layer tests: `tests/users-access.test.ts` (effectivePermissions, grants/revokes, OWNER immunity, owner-role rules, last-owner guard, self-deactivation, username, permission-matrix integrity, diffPermissions) and `tests/validators.test.ts` (staff/password/permission schemas, strict no-password update).
+- Pure decision-layer tests: `tests/users-access.test.ts` (effectivePermissions, grants/revokes, OWNER immunity, owner-role rules, last-owner guard, self-deactivation, username, permission-matrix integrity, diffPermissions), `tests/branch-scope.test.ts`, `tests/branch-rules.test.ts`, `tests/branch-code.test.ts` (access modes, fail-closed filtering, record visibility — including the `exact` kind that excludes org-wide rows — deactivate/reactivate/create guards, visible-branch sets, per-branch card actions), `tests/branch-permissions.test.ts` (the dedicated `branches:*` surface: owner/admin full, receptionist view-only, trainer none, matrix/glossary coverage), `tests/branch-overview.test.ts` (metric order, capped attention items, quick-link allowlist and `?branch=` encoding), `tests/nav-items.test.ts` (canonical nav order, permission filtering, single active item), and `tests/validators.test.ts` (staff/password/permission schemas, strict no-password update).
 - DB-backed guarantees (session bump/rejection, cookie re-issue, org-SQL isolation, audit rows) are exercised manually via the QA checklist in the final task report.

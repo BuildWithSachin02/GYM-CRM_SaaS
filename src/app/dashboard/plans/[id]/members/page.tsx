@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilter, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
 import { dayKeyInTimeZone, pickPrimaryMembership } from "@/lib/memberships"
 
 import { PlanMembersList } from "@/components/plans/plan-members-list"
@@ -28,6 +30,10 @@ export default async function PlanMembersPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
   if (!can(user, "plans:view")) notFound()
+  await requireBranchAccess()
+  const branchFilter = await getBranchFilter()
+  const branchClause = branchFilterWhereRequired(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const plan = await prisma.membershipPlan.findFirst({
     where: { id, organizationId: user.organizationId },
@@ -50,11 +56,17 @@ export default async function PlanMembersPage({ params }: PageProps) {
   // (deduped by memberId); the primary display row per member comes from the
   // same coverage engine used everywhere, so counts here and on the plan card
   // ("View Members") always agree.
+  //
+  // This is a MEMBERS listing, so the home branch is the gate: the member
+  // relation carries the `homeBranchId` clause (that field only exists on
+  // Member) and the membership rows carry their own `branchId` clause.
   const memberships = await prisma.membership.findMany({
     where: {
       organizationId: user.organizationId,
       planId: plan.id,
       status: { not: "CANCELLED" },
+      ...branchClause,
+      member: { is: memberBranchClause },
     },
     include: {
       member: {

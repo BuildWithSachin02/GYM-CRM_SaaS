@@ -1,5 +1,6 @@
 import type {
   AppointmentStatus,
+  BranchStatus,
   LeadSource,
   LeadStage,
   MemberStatus,
@@ -141,6 +142,14 @@ export const USER_ROLE: Record<UserRole, { tone: BadgeTone; label: string }> = {
   ADMIN: { tone: "info", label: "Admin" },
   RECEPTIONIST: { tone: "success", label: "Receptionist" },
   TRAINER: { tone: "warning", label: "Trainer" },
+}
+
+export const BRANCH_STATUS: Record<
+  BranchStatus,
+  { tone: BadgeTone; label: string }
+> = {
+  ACTIVE: { tone: "success", label: "Active" },
+  INACTIVE: { tone: "muted", label: "Inactive" },
 }
 
 export const PLAN_INTERVAL: Record<

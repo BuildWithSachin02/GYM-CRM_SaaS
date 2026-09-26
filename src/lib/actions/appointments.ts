@@ -8,6 +8,7 @@ import { can } from "@/lib/permissions"
 import { writeAudit, AUDIT_ACTIONS } from "@/lib/audit"
 import { appointmentSchema, appointmentStatusSchema } from "@/lib/validators"
 import type { AppointmentInput, AppointmentStatusInput } from "@/lib/validators"
+import { resolveWriteBranch } from "@/lib/branches"
 import { ZodError } from "zod"
 
 type ActionResult =
@@ -47,8 +48,11 @@ export async function createAppointment(input: AppointmentInput): Promise<Action
     endsAt,
     status,
     notes,
-    locationId,
+    branchId: requestedBranchId,
   } = parsed.data
+
+  const resolved = await resolveWriteBranch(requestedBranchId)
+  if (!resolved.ok) return { success: false, error: resolved.error }
 
   const appointment = await prisma.appointment.create({
     data: {
@@ -61,7 +65,7 @@ export async function createAppointment(input: AppointmentInput): Promise<Action
       endsAt,
       status,
       notes: notes ?? null,
-      locationId: locationId ?? null,
+      branchId: resolved.branchId,
     },
   })
 
@@ -75,6 +79,7 @@ export async function createAppointment(input: AppointmentInput): Promise<Action
       memberId: memberId ?? null,
       leadId: leadId ?? null,
       trainerId: trainerId ?? null,
+      branchId: resolved.branchId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status,

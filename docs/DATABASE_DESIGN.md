@@ -2,7 +2,7 @@
 
 ## 1. Guiding constraints
 
-- **PostgreSQL via Prisma ORM.** Prisma is installed as a devDependency but **not initialized**; no `schema.prisma`, no `@prisma/client`, no migrations, no database (yet).
+- **PostgreSQL via Prisma ORM.** Implemented: `prisma/schema.prisma` exists, Prisma Migrate is in use (see `prisma/migrations/`), and the demo database is live. The rest of this document is forward-looking design; sections marked **IMPLEMENTED** describe the schema as it stands.
 - **Shared-schema, tenant-key isolation.** Every organization-owned table carries `organization_id`.
 - **Tenant key derived server-side** — never trusted from the client.
 - **Money as integer minor units.**
@@ -35,9 +35,12 @@ Avoid ambiguous polymorphic references where possible.
 - All organization-owned queries and mutations are tenant-scoped.
 - Never trust `organization_id` supplied by the client; it is resolved server-side from the session.
 
-### D-06 Locations / member attendance
-- `Member.primary_location_id` is **nullable**.
-- A member may attend multiple locations when the organization has multiple locations.
+### D-06 Branch (gym) / member attendance *(IMPLEMENTED as `Branch`)*
+- The planned `Location` is implemented as **`Branch`** (`GymLocation` was promoted/migrated to `Branch`).
+- `Member.homeBranchId` (the member's home `Branch`) is **nullable** — a member can exist before any branch assignment.
+- Operational/knowledge rows carry their own `branchId` (Membership, Payment, CheckIn, QRSession, AttendanceRequest — **NOT NULL**; Lead, Appointment, Task — **nullable**), so a member is never trapped: future "member visits several branches" modeling needs no restructuring.
+- `<Branch>` is **never a tenant boundary**: row visibility = org-scoped AND branch-filtered (see `AUTHORIZATION.md` §5.5).
+- Ownership: `Organization has 1..n Branch`; a branch is soft-deactivated (`status INACTIVE`), never hard-deleted, and an org always keeps its final ACTIVE branch.
 
 ### D-07 QR sessions
 - QR sessions are **reusable attendance points for a gym/location**, not per-member sessions.
@@ -56,7 +59,7 @@ Use a separate **`MembershipFreeze`** table instead of storing freeze history as
 - Enforce via database CHECK constraints where practical **and** application validation.
 
 ### D-10 Soft deletion
-- Use soft deletion/archive semantics where appropriate (plan, member, lead, user, location).
+- Use soft deletion/archive semantics where appropriate (plan, member, lead, user, branch).
 - Prefer **RESTRICT** for important historical references so financial, attendance, and audit history cannot accidentally disappear.
 - Delete behavior is defined explicitly for every important foreign key (see §7).
 
@@ -64,10 +67,9 @@ Use a separate **`MembershipFreeze`** table instead of storing freeze history as
 Use **PostgreSQL native enums** for stable domain states: membership status, payment status, appointment status, lead stage, and the lead source.
 - Document the migration requirements when enum values change (additive before use; value removal requires a data pass — see §7).
 
-### D-12 User role/location
-- **Location-scoped** roles **require** a location.
-- **Organization-scoped** roles must **not** require a location.
-- Enforce **primarily in application/service-layer validation** and add database constraints where practical (a CHECK constraint on `UserRole` expressing "scope=location ⟹ location_id is not null").
+### D-12 User role/branch
+- **Planned:** role × scope (`organization`/`branch`) via a `UserRole` join; branch-scoped roles require a branch (`location_id`/`branch_id` not null), organization-scoped roles do not. Enforce in service-layer validation and DB CHECK where practical.
+- **IMPLEMENTED (prior to full role-scope RBAC):** every user has a single `User.role` (OWNER/ADMIN/RECEPTIONIST/TRAINER) with permission overrides in `UserPermission`; *where* a user operates is scoped by **`UserBranch`** rows. `OWNER` holds org-wide access by role and needs no rows; every other user must be assigned to ACTIVE branches or sees nothing (fail-closed). See `src/lib/branches.ts`.
 
 ### D-13 Lead source canonical form
 - One canonical `LeadSource` representation across the system.
@@ -87,20 +89,27 @@ Every entity marked *org-owned* carries a non-null `organization_id`. The tenant
 - id (UUID) PK, name, slug, currency, timezone, status (native enum: `active`/`sandbox`/`suspended`), created/updated.
 - Seeding is generic; King's Gym is only the first demo row, not hardcoded.
 
-### 4.2 Location (Gym) — org-owned
-- id (UUID) PK, organization_id → Organization, name, address, timezone, status (`active`/`inactive`), deleted_at (nullable, soft-delete), created/updated.
-- Organization has 1..n locations.
+### 4.2 Branch (Gym) — org-owned *(IMPLEMENTED)*
+- id (UUID) PK, organization_id → Organization, **branch_code** (unique per org — `BR-0001`, display-only, never recycled), name, phone, email, address, city, state, country (all nullable), status (`ACTIVE`/`INACTIVE`, soft deactivation), created/updated.
+- Organization has 1..n branches; unique `(organization_id, branch_code)` and `(organization_id, name)`.
+- **No pricing on a Branch** — plans are org-owned; a branch is an operational/attendance point, not a tenant.
+- Branch inherits `Organization.timezone` (no per-branch timezone).
+
+### 4.2.1 UserBranch — org-owned *(IMPLEMENTED branch scope)*
+- id (UUID) PK, organization_id → Organization, user_id → User, branch_id → Branch, **is_primary** (`Boolean`, app-enforced "at most one primary per user" — the deterministic fallback branch), created/updated.
+- Unique `(organization_id, user_id, branch_id)`. `OWNER` needs no rows (org-wide access). onDelete: Cascade with User and with Branch (safe — branches are soft-deleted).
+- Answers *WHERE* a user may operate, separate from permission catalog (`UserPermission`); see `AUTHORIZATION.md` §5.5.
 
 ### 4.3 User — org-owned (staff account)
-- id (UUID) PK, organization_id → Organization, name, email (**globally unique**), password_hash (future), auth_provider_id (nullable), status (`active`/`deactivated`), created/updated.
-- Relationship to locations is via **UserRole** (role × scope).
+- id (UUID) PK, organization_id → Organization, name, email (**globally unique**), password_hash, auth_provider_id (nullable), username (org-scoped display alias, nullable), status (`active`/`deactivated`), session_version, created/updated.
+- Relationship to branches is via **UserBranch** (**implemented**); the planned role×scope `UserRole` model is future work.
 
 ### 4.4 Role / Permission (RBAC)
 - **Role**: id (UUID) PK, organization_id (nullable ⇒ system default), name, key, is_system, permissions (JSONB array of permission keys), created/updated.
 - **UserRole**: id (UUID) PK, user_id → User, role_id → Role, scope (native enum: `organization`/`location`), location_id (nullable; required when scope=location; CHECK constraint per D-12), created/updated.
 
 ### 4.5 Member — org-owned
-- id (UUID) PK, organization_id → Organization, primary_location_id → Location (**nullable**), **member_code (unique per org, display-only, auto-assigned — `MEM-0001`; never recycled)**, name (first/last), email (org-scoped), phone (org-scoped, **not unique**), photo_url (nullable), status (`active`/`frozen`/`inactive`), signup_source (nullable, canonical `LeadSource` enum per D-13), deleted_at (nullable), created/updated.
+- id (UUID) PK, organization_id → Organization, **home_branch_id → Branch (nullable — the member's home branch; memberships/operations carry their own branch and are never trapped)**, **member_code (unique per org, display-only, auto-assigned — `MEM-0001`; never recycled)**, name (first/last), email (org-scoped), phone (org-scoped, **not unique**), photo_url (nullable), status (`active`/`frozen`/`inactive`), signup_source (nullable, canonical `LeadSource` enum per D-13), deleted_at (nullable), created/updated.
 - Relationship to plans is via **Membership**.
 
 ### 4.6 Trainer — org-owned
@@ -124,12 +133,12 @@ Every entity marked *org-owned* carries a non-null `organization_id`. The tenant
 - id (UUID) PK, organization_id → Organization, membership_id → Membership, member_id → Member, amount_minor (integer), currency, method (native enum: `cash`/`card`/`transfer`/`upi`), reference (nullable), status (native enum: `recorded`/`refunded`/`voided`), recorded_by_user_id → User, captured_at, created/updated.
 
 ### 4.11 QR Attendance
-- **QRSession** (reusable location-based token, D-07): id (UUID) PK, organization_id → Organization, location_id → Location (the attendance point), token_hash (**unique**, only the hash is stored), expires_at, revoked_at (nullable), created_by_user_id → User, created_at.
-- **CheckIn**: id (UUID) PK, organization_id → Organization, location_id → Location, member_id → Member, qr_session_id → QRSession, checked_in_at, source (`qr-session`), created_at.
-- A QRSession is a short-lived random token for a location; many members may check in against it during its validity. Member identity comes from the authenticated member flow, never from the QR.
+- **QRSession** (reusable branch-based token, D-07): id (UUID) PK, organization_id → Organization, **branch_id** → Branch (the attendance point, NOT NULL), token_hash (**unique**, only the hash is stored), expires_at, revoked_at (nullable), created_by_user_id → User, created_at.
+- **CheckIn**: id (UUID) PK, organization_id → Organization, **branch_id** → Branch (NOT NULL), member_id → Member, qr_session_id → QRSession, checked_in_at, source (`qr-session`), created_at.
+- A QRSession is a short-lived random token for a branch; many members may check in against it during its validity. Only ACTIVE branches may issue/scan sessions (`branch_inactive` gate). Member identity comes from the authenticated member flow, never from the QR.
 
 ### 4.12 Lead — org-owned
-- id (UUID) PK, organization_id → Organization, location_id → Location, owner_user_id → User (nullable), name, email (org-scoped), phone (org-scoped), source (canonical `LeadSource` enum, D-13), source_detail (nullable), current_stage (native enum), engaged_at (nullable), converted_on (nullable), converted_member_id → Member (nullable, unique), deleted_at (nullable), created/updated.
+- id (UUID) PK, organization_id → Organization, **branch_id → Branch (nullable — an org-level lead is visible everywhere)**, owner_user_id → User (nullable), name, email (org-scoped), phone (org-scoped), source (canonical `LeadSource` enum, D-13), source_detail (nullable), current_stage (native enum), engaged_at (nullable), converted_on (nullable), converted_member_id → Member (nullable, unique), deleted_at (nullable), created/updated.
 
 ### 4.13 LeadSource (canonical, native enum, D-13)
 - `website`, `instagram`, `facebook`, `whatsapp`, `google`, `walk-in`, `manual` (+ optional `source_detail` free text).
@@ -146,7 +155,7 @@ Every entity marked *org-owned* carries a non-null `organization_id`. The tenant
 - id (UUID) PK, organization_id → Organization, lead_id → Lead, assignee_user_id → User, due_at, status (`open`/`done`/`dismissed`), reminder_sent_at (nullable), created/updated.
 
 ### 4.17 Appointment — org-owned
-- id (UUID) PK, organization_id → Organization, location_id → Location, **lead_id (nullable)**, **member_id (nullable)**, staff_user_id → User, starts_at, ends_at, status (native enum: `scheduled`/`completed`/`cancelled`/`no-show`), notes (nullable), created/updated.
+- id (UUID) PK, organization_id → Organization, **branch_id → Branch (nullable — org-level appointments are visible everywhere)**, **lead_id (nullable)**, **member_id (nullable)**, staff_user_id → User, starts_at, ends_at, status (native enum: `scheduled`/`completed`/`cancelled`/`no-show`), notes (nullable), created/updated.
 - D-04: exactly one of `lead_id`/`member_id` non-null, enforced by CHECK constraint (raw SQL).
 
 ### 4.18 AutomationRule — org-owned
@@ -168,22 +177,22 @@ Every entity marked *org-owned* carries a non-null `organization_id`. The tenant
 ## 5. Key relationships at a glance
 
 ```
-Organization 1—n Location
+Organization 1—n Branch
 Organization 1—n User
-User n—n Role  (via UserRole, role × scope)
-Organization 1—n Member (n—1 Location, primary_location nullable)
+User n—n Branch (via UserBranch, is_primary=dflt)   [implemented]
+User n—n Role (via UserRole, role × scope)          [planned]
+Organization 1—n Member (n—1 Branch home, homeBranchId nullable)
 Organization 1—n MembershipPlan
 Member 1—n Membership n—1 MembershipPlan
-Membership 1—n MembershipFreeze
 Member 1—n Payment  (Payment n—1 Membership)
-Organization 1—n Lead (n—1 Owner User, n—1 Location)
+Organization 1—n Lead (n—1 Owner User, n—1 Branch)
 Lead 1—n LeadActivity
 Lead 1—n FollowUp
 Lead 0..1 Member (converted)
 Appointment n—1 (Lead | Member) [exactly one], n—1 Staff User
 Organization 1—n AutomationRule 1—n AutomationJob
 Organization 1—n Notification 0..1 (User | Lead | Member) [exactly one]
-Organization 1—n QRSession (n—1 Location); Member 1—n CheckIn n—1 QRSession
+Organization 1—n QRSession (n—1 Branch); Member 1—n CheckIn n—1 QRSession
 Organization 1—n AuditLog
 ```
 
@@ -191,11 +200,13 @@ Organization 1—n AuditLog
 
 - Composite index on every org-owned table prefixed by `organization_id`.
 - **User**: unique `email` (global).
-- **Member**: unique `(organization_id, email)` where email non-null (partial); **unique `(organization_id, member_code)`** (the org-scoped, display-only Member Code); phone is **not** unique — even within an org (family members share phones; see D-02); `(organization_id, status)`; `(organization_id, primary_location_id)`.
+- **Member**: unique `(organization_id, email)` where email non-null (partial); **unique `(organization_id, member_code)`** (the org-scoped, display-only Member Code); phone is **not** unique — even within an org (family members share phones; see D-02); `(organization_id, status)`; `(organization_id, home_branch_id)`.
+- **Branch**: unique `(organization_id, branch_code)`; unique `(organization_id, name)`; `(organization_id, status)`; `(organization_id, status, name)`.
+- **UserBranch**: unique `(organization_id, user_id, branch_id)`; `(organization_id, user_id)`; `(organization_id, branch_id)`.
 - **Membership**: `(organization_id, status)`; `(organization_id, member_id)`; **partial unique** for one active per (member, plan): `(organization_id, member_id, plan_id)` WHERE status IN (`draft`,`active`,`frozen`).
 - **MembershipFreeze**: `(organization_id, membership_id)`; `(organization_id, frozen_from, frozen_to)` for reporting.
 - **Payment**: `(organization_id, membership_id)`; `(organization_id, member_id)`; `(organization_id, captured_at)`.
-- **CheckIn**: `(organization_id, location_id, checked_in_at)`; `(organization_id, member_id)`.
+- **CheckIn**: `(organization_id, branch_id, checked_in_at)`; `(organization_id, member_id)`.
 - **QRSession**: unique `token_hash`; `(organization_id, expires_at)` for cleanup; `(expires_at)` for expiry sweeps.
 - **AutomationJob**: `(organization_id, status)`; unique `(organization_id, rule_id, dedupe_key)`.
 - **AuditLog**: `(organization_id, occurred_at)`; `(organization_id, entity_type, entity_id)`.
@@ -215,13 +226,14 @@ Organization 1—n AuditLog
 ### Delete behavior (all explicit)
 - Use **RESTRICT** (default) for all important historical references so financial, attendance, and audit history cannot vanish:
   - Payment → Membership, Member, User(recorder): RESTRICT.
-  - CheckIn → Member, QRSession, Location: RESTRICT.
+  - CheckIn → Member, QRSession, Branch: RESTRICT.
   - AuditLog → Organization, User(actor nullable): RESTRICT; audit rows are never deleted.
   - Lead → Member (`converted_member_id`): SET NULL or RESTRICT per conversion semantics — see remaining-ambiguity note.
   - Membership → Member, Plan: RESTRICT.
   - MembershipFreeze → Membership: RESTRICT (cascade only if membership deletion semantics say so; default RESTRICT).
   - LeadActivity/FollowUp → Lead: RESTRICT (or CASCADE on soft-delete path; default RESTRICT).
-- **Soft delete** (`deleted_at`) for Location, Member, Lead, Plan, User (deactivate), not for money/audit records.
+- **Soft delete/deactivate** (`deleted_at` or status) for Member, Lead, Plan, User (deactivate), Branch (soft deactivate — no hard delete, the final ACTIVE branch is protected; no pricing on branch), not for money/audit records.
+- UserBranch rows cascade with their user or branch (safe: branches are soft-deleted, so this fires only in tests/cleanup).
 - Organization deletion: RESTRICT everywhere; an org is deactivated/suspended, never hard-deleted while history exists.
 
 ### Enums (native PostgreSQL)

@@ -40,6 +40,32 @@ Built from the ground up as a multi-tenant SaaS application.
 
 ---
 
+### 🏬 Branches
+
+A gym that runs more than one location manages it from `/dashboard/branches`, not
+from a settings tab. The module is first-class: it has its own navigation entry,
+its own route and its own dedicated permissions.
+
+* Branch directory with a card per location
+* Per-branch overview metrics: active members, expiring memberships, outstanding
+  dues, today's check-ins, open leads and 30-day revenue
+* "Requires attention" alerts (deactivated branch, expiring memberships, unpaid
+  dues, no active members, leads waiting)
+* Quick links from a branch straight into the modules that matter for it
+  (members, memberships, payments, attendance, leads, appointments, tasks,
+  reports), with the branch context re-validated server-side
+* Create and edit branch details (name, phone, email, address)
+* Deactivate instead of delete: a deactivated location keeps its history, stops
+  accepting new work (including QR scans) and can be reactivated
+* Per-branch staff access with a primary branch per staff member
+* Dedicated permissions, independent of gym settings administration
+
+Branch codes (`BR-0001`, …) are generated server-side, unique per organization
+and permanent. An organization's **last active branch can never be
+deactivated**, so a tenant can never lock itself out of its own data.
+
+---
+
 ### 👥 Member Management
 
 Manage the complete member lifecycle from one dashboard.
@@ -473,6 +499,53 @@ Because Gym CRM is a multi-tenant SaaS application, tenant isolation is a core a
 
 > **Never execute a tenant-owned database query without first establishing the authenticated tenant context.**
 
+### Branch Scoping
+
+Branches add a **second** isolation axis inside a tenant. The rule is the same:
+a branch id from a cookie, query string or form field is a *preference*, never
+proof of authority.
+
+* `getBranchFilter()` resolves the viewer's read scope from the session:
+  an **owner** reads the whole organization, everyone else reads their assigned
+  branches (plus organization-wide records).
+* `getBranchFilterForRequest()` handles an explicit `?branch=<id>` (used by the
+  Branches module's quick links). The id is resolved against the organization's
+  **active** branches and the viewer's own authority; anything unknown, foreign,
+  inactive or unauthorized returns a 404 rather than falling back to a wider
+  scope.
+* Every branch-scoped server action re-checks the visible-branch set, so
+  holding `branches:edit` does not let a restricted admin edit a location they
+  are not assigned to.
+* `exactBranchFilter()` exists for metrics that must be attributed to exactly
+  one branch. It has **no** organization-wide arm, which is what stops a
+  branch's card from absorbing org-wide or sibling-branch records.
+
+Branch filter kinds (`src/lib/branch-scope.ts`):
+
+| Kind      | Matches                                          | Used for                        |
+| --------- | ------------------------------------------------ | ------------------------------- |
+| `all`     | everything in the organization                   | owner-wide pages                 |
+| `single`  | one branch **+ org-wide** records                | a branch context in a module     |
+| `multi`   | a set of branches **+ org-wide** records         | multi-branch staff views         |
+| `exact`   | one branch, **nothing else**                     | per-branch card metrics          |
+| `none`    | nothing (fail-closed backstop)                   | viewers with no branch access    |
+
+### Branch Permissions
+
+Branch administration is **not** part of `settings:manage`:
+
+| Permission             | Grants                                                     |
+| ---------------------- | ---------------------------------------------------------- |
+| `branches:view`        | See the branch directory and branch details                 |
+| `branches:create`      | Add a branch                                                |
+| `branches:edit`        | Rename a branch and edit its contact details                |
+| `branches:deactivate`  | Deactivate and reactivate a location                        |
+| `branches:manage`      | Grant and revoke which staff may operate in a location      |
+
+Owners and admins hold all five; receptionists may view only; trainers have no
+branch surface. A gym can therefore delegate running a location without handing
+over gym settings or data export.
+
 ---
 
 ## 🗺️ Product Roadmap
@@ -536,7 +609,6 @@ The architecture is designed to support future SaaS capabilities such as:
 * Organization-level administration
 * Role-based access control
 * Staff management
-* Multiple branches per organization
 * Custom branding
 * Automated billing
 * Payment gateway integration

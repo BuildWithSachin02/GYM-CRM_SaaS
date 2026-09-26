@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { requireUser } from "@/lib/auth/auth"
 import { prisma } from "@/lib/prisma"
 import { can } from "@/lib/permissions"
+import { getBranchFilter, requireBranchAccess } from "@/lib/branches"
+import { branchFilterWhere, branchFilterWhereRequired } from "@/lib/branch-scope"
 import {
   dayKeyInTimeZone,
   getMemberCoverage,
@@ -25,8 +27,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { id } = await params
   const user = await requireUser()
 
+  // Same branch clause as the page body, so a member the viewer may not see
+  // never leaks their name through the document title.
+  const memberBranchClause = branchFilterWhere(await getBranchFilter(), "homeBranchId")
+
   const member = await prisma.member.findFirst({
-    where: { id, organizationId: user.organizationId, deletedAt: null },
+    where: { id, organizationId: user.organizationId, deletedAt: null, ...memberBranchClause },
     select: { firstName: true, lastName: true },
   })
 
@@ -39,9 +45,13 @@ export default async function MemberDetailPage({ params }: PageProps) {
   const { id } = await params
   const user = await requireUser()
   if (!can(user, "members:view")) notFound()
+  await requireBranchAccess()
+  const branchFilter = await getBranchFilter()
+  const branchClause = branchFilterWhereRequired(branchFilter)
+  const memberBranchClause = branchFilterWhere(branchFilter, "homeBranchId")
 
   const member = await prisma.member.findFirst({
-    where: { id, organizationId: user.organizationId, deletedAt: null },
+    where: { id, organizationId: user.organizationId, deletedAt: null, ...memberBranchClause },
     select: {
       id: true,
       memberCode: true,
@@ -60,6 +70,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
       createdAt: true,
       updatedAt: true,
       memberships: {
+        where: { ...branchClause },
         orderBy: [{ endDate: "desc" }, { createdAt: "desc" }],
         select: {
           id: true,
@@ -81,7 +92,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
         },
       },
       payments: {
-        where: { status: "RECORDED" },
+        where: { status: "RECORDED", ...branchClause },
         orderBy: { paymentDate: "desc" },
         take: 10,
         select: {
@@ -107,7 +118,9 @@ export default async function MemberDetailPage({ params }: PageProps) {
         },
       },
       _count: {
-        select: { checkIns: true },
+        select: {
+          checkIns: { where: { ...branchClause } },
+        },
       },
     },
   })
@@ -135,7 +148,8 @@ export default async function MemberDetailPage({ params }: PageProps) {
   const attendanceOverview = await getMemberAttendanceOverview(
     user.organizationId,
     member.id,
-    timeZone
+    timeZone,
+    branchFilter
   )
 
   // RECORDED-only sums per membership so the profile can show what is paid and
@@ -148,6 +162,7 @@ export default async function MemberDetailPage({ params }: PageProps) {
       memberId: member.id,
       status: "RECORDED",
       membershipId: { not: null },
+      ...branchClause,
     },
     _sum: { amountMinor: true },
   })

@@ -1,6 +1,7 @@
 import "server-only"
 
 import { prisma } from "@/lib/prisma"
+import { branchFilterWhere, type BranchFilter } from "@/lib/branch-scope"
 import { LIFECYCLE_STATUS_ORDER } from "@/lib/memberships"
 import { addDaysToKey, utcInstantForKey } from "@/lib/memberships"
 import { getMembershipLifecycleStats } from "@/lib/domain/memberships"
@@ -41,10 +42,17 @@ export type ReportsData = {
   appointmentStatuses: { status: string; count: number }[]
 }
 
+/**
+ * Every section runs over the SAME inclusive [fromKey, toKey] span AND the
+ * SAME branch scope, so the KPI, both trends and every breakdown reconcile by
+ * construction. A fail-closed filter ("none") short-circuits to an empty
+ * report instead of querying.
+ */
 export async function getReportsData(
   organizationId: string,
   timeZone: string,
-  query: ReportQuery
+  query: ReportQuery,
+  branchFilter: BranchFilter
 ): Promise<ReportsData> {
   const { range, fromKey, toKey } = query
 
@@ -57,24 +65,60 @@ export async function getReportsData(
   const rangeStart = utcInstantForKey(fromKey, timeZone)
   const rangeEnd = utcInstantForKey(addDaysToKey(toKey, 1), timeZone)
 
+  if (branchFilter.kind === "none") {
+    return {
+      range,
+      fromKey,
+      toKey,
+      rangeStart: rangeStart.toISOString(),
+      rangeEnd: rangeEnd.toISOString(),
+      kpis: {
+        revenue: 0,
+        memberGain: 0,
+        newLeads: 0,
+        conversions: 0,
+        attendanceCount: 0,
+        paymentsCount: 0,
+      },
+      revenueTrend: [],
+      attendanceTrend: [],
+      paymentMethods: [],
+      leadSources: [],
+      planRevenue: [],
+      membershipStatuses: LIFECYCLE_STATUS_ORDER.map((status) => ({ status, count: 0 })),
+      appointmentStatuses: [],
+    }
+  }
+
   // Canonical revenue: one org-scoped, org-timezone attribution used by the
   // KPI, the trend and both revenue breakdowns — they reconcile by
   // construction (see getRevenueAnalysis).
   const [revenueData, attendanceTrend, memberGain, newLeads, conversions] =
     await Promise.all([
-      getRevenueAnalysis(organizationId, timeZone, { fromKey, toKey }),
-      getAttendanceTrendByDay(organizationId, timeZone, { fromKey, toKey }),
+      getRevenueAnalysis(organizationId, timeZone, { fromKey, toKey }, branchFilter),
+      getAttendanceTrendByDay(organizationId, timeZone, { fromKey, toKey }, branchFilter),
       prisma.member.count({
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
+        where: {
+          organizationId,
+          deletedAt: null,
+          createdAt: { gte: rangeStart, lt: rangeEnd },
+          ...branchFilterWhere(branchFilter, "homeBranchId"),
+        },
       }),
       prisma.lead.count({
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
+        where: {
+          organizationId,
+          deletedAt: null,
+          createdAt: { gte: rangeStart, lt: rangeEnd },
+          ...branchFilterWhere(branchFilter),
+        },
       }),
       prisma.lead.count({
         where: {
           organizationId,
           deletedAt: null,
           convertedAt: { gte: rangeStart, lt: rangeEnd },
+          ...branchFilterWhere(branchFilter),
         },
       }),
     ])
@@ -83,18 +127,23 @@ export async function getReportsData(
     await Promise.all([
       prisma.lead.groupBy({
         by: ["source"],
-        where: { organizationId, deletedAt: null, createdAt: { gte: rangeStart, lt: rangeEnd } },
+        where: {
+          organizationId,
+          deletedAt: null,
+          createdAt: { gte: rangeStart, lt: rangeEnd },
+          ...branchFilterWhere(branchFilter),
+        },
         _count: { _all: true },
       }),
       // Membership statuses are record-level and date-derived (UPCOMING /
       // ACTIVE / EXPIRING_SOON / EXPIRED / CANCELLED / PAUSED) so the report
       // reflects business state, not the write-time DB enum.
-      getMembershipLifecycleStats(organizationId, timeZone).then(
+      getMembershipLifecycleStats(organizationId, timeZone, branchFilter).then(
         (s) => s.records
       ),
       prisma.appointment.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, ...branchFilterWhere(branchFilter) },
         _count: { _all: true },
       }),
     ])

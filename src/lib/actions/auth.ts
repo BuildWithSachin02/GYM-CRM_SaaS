@@ -6,6 +6,7 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { verifyPassword } from "@/lib/auth/password"
 import { SESSION_COOKIE, createSessionToken } from "@/lib/auth/session"
+import { BRANCH_COOKIE } from "@/lib/branches"
 import { loginSchema } from "@/lib/validators"
 import { writeAudit } from "@/lib/audit"
 
@@ -67,5 +68,6 @@ export async function loginAction(input: { email: string; password: string }) {
 export async function logoutAction() {
   const cookieStore = await cookies()
   cookieStore.delete(SESSION_COOKIE)
+  cookieStore.delete(BRANCH_COOKIE)
   redirect("/login")
 }

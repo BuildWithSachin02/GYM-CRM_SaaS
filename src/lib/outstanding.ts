@@ -43,6 +43,13 @@ export type OutstandingMembershipRecord = {
   /** The agreed price this membership must be paid in full by. */
   amountMinor: number
   expectedPaymentDate: Date | null
+  /**
+   * The branch this membership period was SOLD at. NOT NULL in the schema, but
+   * optional here so pure callers/tests may omit it; it is carried through
+   * untouched and exists only so per-branch dues can be attributed (the
+   * Branches overview). It never influences any balance.
+   */
+  branchId?: string | null
 }
 
 /** The subset of a Payment needed for balance math. */
@@ -54,6 +61,8 @@ export type OutstandingPaymentRecord = {
 
 export type OutstandingMembership = {
   membershipId: string
+  /** Carried through from the source row (see OutstandingMembershipRecord). */
+  branchId: string | null
   finalPayableMinor: number
   paidMinor: number
   outstandingMinor: number
@@ -166,6 +175,7 @@ export function outstandingOfMembership(input: {
   })
   return {
     membershipId: row.id,
+    branchId: row.branchId ?? null,
     finalPayableMinor: row.amountMinor,
     paidMinor: input.paidMinor,
     outstandingMinor,
